@@ -48,6 +48,10 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const CONFIG_OK = /^https?:\/\//.test(SUPABASE_URL) && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY.length > 20 && SUPABASE_ANON_KEY.indexOf('COLE_AQUI') === -1;
 const sb = CONFIG_OK ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+// Loja única compartilhada — todos os logins autenticados leem/gravam neste mesmo registro,
+// em vez de cada login ter os próprios dados isolados.
+const SHARED_STORE_ID = '39fa249d-9ca3-45d4-a3ad-de8cd73bcccf';
+
 function Icon({ children, size = 16, ...props }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -194,7 +198,7 @@ function App({ sb, session, onSignOut }) {
         const { data: row, error } = await sb
           .from('movia_data')
           .select('data')
-          .eq('user_id', session.user.id)
+          .eq('user_id', SHARED_STORE_ID)
           .maybeSingle();
         if (error) throw error;
         setData(row && row.data && Object.keys(row.data).length ? { ...emptyData(), ...row.data } : emptyData());
@@ -212,7 +216,7 @@ function App({ sb, session, onSignOut }) {
       try {
         const { error } = await sb
           .from('movia_data')
-          .upsert({ user_id: session.user.id, data, updated_at: new Date().toISOString() });
+          .upsert({ user_id: SHARED_STORE_ID, data, updated_at: new Date().toISOString() });
         if (error) throw error;
         setSaveState('saved');
       } catch (e) {
@@ -370,7 +374,7 @@ function App({ sb, session, onSignOut }) {
         photoUrl: p.photoUrl || '', price: p.retail || 0,
       }));
       const { error } = await sb.from('catalog_public').upsert({
-        user_id: session.user.id,
+        user_id: SHARED_STORE_ID,
         whatsapp_number: (data.catalogSettings && data.catalogSettings.whatsappNumber) || '',
         store_name: (data.catalogSettings && data.catalogSettings.storeName) || 'movia.',
         products: snapshot,
