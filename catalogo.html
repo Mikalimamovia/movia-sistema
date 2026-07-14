@@ -31,11 +31,6 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo } = React;
 
-// =====================================================================
-// Mesma configuração do Supabase usada no sistema principal.
-// A anon key é feita para ser pública — é assim que o catálogo funciona
-// sem exigir login do cliente.
-// =====================================================================
 const SUPABASE_URL = 'https://xjeyykvousnpxvjeourn.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZXl5a3ZvdXNucHh2amVvdXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMTA1NDYsImV4cCI6MjA5OTU4NjU0Nn0.Oq9Fy4fNvMz1459mKA_dP71RWU0udKSABumBHaJBGRg';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -48,7 +43,6 @@ function formatBRL(v) {
 const PAYMENT_METHODS = [
   { value: 'pix', label: 'Pix' },
   { value: 'cartao', label: 'Cartão (link de pagamento)' },
-  { value: 'dinheiro', label: 'Dinheiro na entrega' },
 ];
 
 function Fonts() {
@@ -71,27 +65,138 @@ function Fonts() {
         background: transparent; border: 1px solid rgb(64 64 64); color: rgb(212 212 212);
         padding: 8px 14px; border-radius: 4px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       }
+      .chip {
+        border: 1px solid rgb(64 64 64); color: rgb(212 212 212); font-size: 12px;
+        padding: 4px 10px; border-radius: 3px; background: transparent;
+      }
+      .chip.selected { background: rgb(255 255 255); color: rgb(0 0 0); border-color: rgb(255 255 255); font-weight: 700; }
+      .chip.disabled { color: rgb(82 82 82); border-color: rgb(38 38 38); text-decoration: line-through; }
     `}</style>
   );
 }
 
-function ProductCard({ product, qty, onQty, onAdd }) {
+function Lightbox({ photos, index, onClose, onNav }) {
+  if (index === null || index === undefined) return null;
+  return (
+    <div
+      className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center px-4"
+      onClick={onClose}
+    >
+      <button onClick={onClose} className="absolute top-4 right-4 text-white text-2xl leading-none">✕</button>
+      {photos.length > 1 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onNav(-1); }}
+          className="absolute left-2 sm:left-6 text-white text-3xl px-2"
+        >‹</button>
+      )}
+      <img
+        src={photos[index]}
+        alt=""
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[85vh] max-w-full object-contain"
+      />
+      {photos.length > 1 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onNav(1); }}
+          className="absolute right-2 sm:right-6 text-white text-3xl px-2"
+        >›</button>
+      )}
+    </div>
+  );
+}
+
+function ProductCard({ product, onAddToCart, onOpenLightbox }) {
+  const photos = product.photos || [];
+  const variants = product.variants || [];
+  const colors = [...new Set(variants.map(v => v.color))];
+  const [selectedColor, setSelectedColor] = useState(colors[0] || null);
+  const [selectedSize, setSelectedSize] = useState(null);
+  const [qty, setQty] = useState(1);
+
+  const sizesForColor = variants.filter(v => v.color === selectedColor);
+  const allOutOfStock = variants.length > 0 && variants.every(v => !v.inStock);
+  const canAdd = selectedColor && selectedSize && !allOutOfStock;
+
+  const pickSize = (v) => {
+    if (!v.inStock) return;
+    setSelectedSize(v.size);
+  };
+
+  const add = () => {
+    if (!canAdd) return;
+    onAddToCart({ productId: product.id, name: product.name, color: selectedColor, size: selectedSize, price: product.price, qty });
+    setQty(1);
+  };
+
   return (
     <div className="bg-neutral-950 border border-neutral-800 flex flex-col">
-      <div className="aspect-square bg-neutral-900 flex items-center justify-center overflow-hidden">
-        {product.photoUrl ? (
-          <img src={product.photoUrl} alt={product.name} className="w-full h-full object-cover" />
+      <div
+        className="relative aspect-square bg-neutral-900 flex items-center justify-center overflow-hidden cursor-pointer"
+        onClick={() => photos.length && onOpenLightbox(photos, 0)}
+      >
+        {photos[0] ? (
+          <img src={photos[0]} alt={product.name} className="w-full h-full object-cover" />
         ) : (
           <span className="text-neutral-700 text-xs fw-mono">sem foto</span>
         )}
+        {allOutOfStock && (
+          <div className="absolute inset-0 bg-black/75 flex items-center justify-center">
+            <span className="text-white text-sm font-bold tracking-wide border border-white px-3 py-1">ESGOTADO</span>
+          </div>
+        )}
       </div>
+
+      {photos.length > 1 && (
+        <div className="flex gap-1 p-1.5">
+          {photos.map((ph, i) => (
+            <img
+              key={i} src={ph} alt=""
+              onClick={() => onOpenLightbox(photos, i)}
+              className="w-10 h-10 object-cover border border-neutral-800 cursor-pointer"
+            />
+          ))}
+        </div>
+      )}
+
       <div className="p-3 flex flex-col gap-2 flex-1">
         <div className="text-sm font-medium text-neutral-100 leading-snug">{product.name}</div>
         {product.category && <div className="text-[11px] text-neutral-500">{product.category}</div>}
-        <div className="fw-mono text-white font-bold text-base mt-auto">{formatBRL(product.price)}</div>
+        {product.description && <div className="text-[12px] text-neutral-400">{product.description}</div>}
+        {product.notes && <div className="text-[11px] text-neutral-600 italic">{product.notes}</div>}
+
+        {colors.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {colors.map(c => (
+              <button
+                key={c}
+                onClick={() => { setSelectedColor(c); setSelectedSize(null); }}
+                className={`chip ${selectedColor === c ? 'selected' : ''}`}
+              >{c}</button>
+            ))}
+          </div>
+        )}
+
+        {selectedColor && sizesForColor.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {sizesForColor.map(v => (
+              <button
+                key={v.size}
+                onClick={() => pickSize(v)}
+                disabled={!v.inStock}
+                className={`chip ${selectedSize === v.size ? 'selected' : ''} ${!v.inStock ? 'disabled' : ''}`}
+                title={!v.inStock ? 'Esgotado' : ''}
+              >{v.size}</button>
+            ))}
+          </div>
+        )}
+
+        <div className="fw-mono text-white font-bold text-base mt-auto pt-1">{formatBRL(product.price)}</div>
+
         <div className="flex items-center gap-2">
-          <input type="number" min="1" value={qty} onChange={e => onQty(Math.max(1, Number(e.target.value) || 1))} className="fw-input w-16 text-center" />
-          <button onClick={onAdd} className="fw-btn-ghost flex-1">Adicionar</button>
+          <input type="number" min="1" value={qty} onChange={e => setQty(Math.max(1, Number(e.target.value) || 1))} className="fw-input w-16 text-center" />
+          <button onClick={add} disabled={!canAdd} className="fw-btn flex-1">
+            {allOutOfStock ? 'Esgotado' : !selectedColor ? 'Escolha a cor' : !selectedSize ? 'Escolha o tamanho' : 'Adicionar'}
+          </button>
         </div>
       </div>
     </div>
@@ -99,11 +204,11 @@ function ProductCard({ product, qty, onQty, onAdd }) {
 }
 
 function App() {
-  const [catalog, setCatalog] = useState(undefined); // undefined = loading, null = not found
-  const [qtyByProduct, setQtyByProduct] = useState({});
+  const [catalog, setCatalog] = useState(undefined);
   const [cart, setCart] = useState([]);
   const [payment, setPayment] = useState('pix');
   const [clientName, setClientName] = useState('');
+  const [lightbox, setLightbox] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -112,25 +217,27 @@ function App() {
         if (error) throw error;
         setCatalog(data || null);
       } catch (e) {
-        console.error('Erro ao carregar cat\u00e1logo:', e);
+        console.error('Erro ao carregar catálogo:', e);
         setCatalog(null);
       }
     })();
   }, []);
 
-  const addToCart = (product) => {
-    const qty = qtyByProduct[product.id] || 1;
+  const addToCart = (item) => {
     setCart(c => {
-      const existing = c.find(i => i.id === product.id);
+      const existing = c.find(i => i.productId === item.productId && i.color === item.color && i.size === item.size);
       if (existing) {
-        return c.map(i => i.id === product.id ? { ...i, qty: i.qty + qty } : i);
+        return c.map(i => i === existing ? { ...i, qty: i.qty + item.qty } : i);
       }
-      return [...c, { id: product.id, name: product.name, price: product.price, qty }];
+      return [...c, item];
     });
   };
 
-  const removeFromCart = (id) => setCart(c => c.filter(i => i.id !== id));
+  const removeFromCart = (idx) => setCart(c => c.filter((_, i) => i !== idx));
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+
+  const openLightbox = (photos, index) => setLightbox({ photos, index });
+  const navLightbox = (delta) => setLightbox(lb => lb ? { ...lb, index: (lb.index + delta + lb.photos.length) % lb.photos.length } : lb);
 
   const buildMessage = () => {
     const storeName = (catalog && catalog.store_name) || 'movia.';
@@ -139,7 +246,7 @@ function App() {
     if (clientName.trim()) lines.push(`Cliente: ${clientName.trim()}`);
     lines.push('');
     cart.forEach(item => {
-      lines.push(`${item.qty}x ${item.name} - ${formatBRL(item.price)} un. = ${formatBRL(item.price * item.qty)}`);
+      lines.push(`${item.qty}x ${item.name} (${item.color}/${item.size}) - ${formatBRL(item.price)} un. = ${formatBRL(item.price * item.qty)}`);
     });
     lines.push('');
     lines.push(`Total: ${formatBRL(total)}`);
@@ -184,29 +291,30 @@ function App() {
       </header>
 
       <main className="max-w-5xl mx-auto p-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {catalog.products.map(p => (
-            <ProductCard
-              key={p.id}
-              product={p}
-              qty={qtyByProduct[p.id] || 1}
-              onQty={v => setQtyByProduct(q => ({ ...q, [p.id]: v }))}
-              onAdd={() => addToCart(p)}
-            />
+            <ProductCard key={p.id} product={p} onAddToCart={addToCart} onOpenLightbox={openLightbox} />
           ))}
         </div>
       </main>
+
+      <Lightbox
+        photos={lightbox ? lightbox.photos : []}
+        index={lightbox ? lightbox.index : null}
+        onClose={() => setLightbox(null)}
+        onNav={navLightbox}
+      />
 
       {cart.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-950 border-t border-neutral-800 p-4">
           <div className="max-w-5xl mx-auto">
             <div className="max-h-32 overflow-y-auto mb-3">
-              {cart.map(item => (
-                <div key={item.id} className="flex items-center justify-between text-[13px] text-neutral-300 py-1">
-                  <span>{item.qty}x {item.name}</span>
+              {cart.map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between text-[13px] text-neutral-300 py-1">
+                  <span>{item.qty}x {item.name} ({item.color}/{item.size})</span>
                   <span className="flex items-center gap-2">
                     {formatBRL(item.price * item.qty)}
-                    <button onClick={() => removeFromCart(item.id)} className="text-neutral-600 hover:text-white">✕</button>
+                    <button onClick={() => removeFromCart(idx)} className="text-neutral-600 hover:text-white">✕</button>
                   </span>
                 </div>
               ))}
