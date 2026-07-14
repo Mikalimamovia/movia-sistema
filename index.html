@@ -371,7 +371,9 @@ function App({ sb, session, onSignOut }) {
     try {
       const snapshot = data.products.map(p => ({
         id: p.id, name: p.name, category: p.category,
-        photoUrl: p.photoUrl || '', price: p.retail || 0,
+        photos: p.photos || [], price: p.retail || 0,
+        description: p.description || '', notes: p.notes || '',
+        variants: (p.variants || []).map(v => ({ color: v.color, size: v.size, inStock: v.stock > 0 })),
       }));
       const { error } = await sb.from('catalog_public').upsert({
         user_id: SHARED_STORE_ID,
@@ -606,8 +608,31 @@ function PhotoUploader({ sb, value, onChange }) {
   );
 }
 
+function MultiPhotoUploader({ sb, photos, onChange }) {
+  const arr = photos || [];
+  const setAt = (i, url) => {
+    const next = [...arr];
+    if (url) next[i] = url; else next.splice(i, 1);
+    onChange(next.filter(Boolean));
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {arr.map((url, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <div className="flex-1"><PhotoUploader sb={sb} value={url} onChange={u => setAt(i, u)} /></div>
+          <button type="button" onClick={() => setAt(i, '')} className="fw-btn-ghost"><X size={12} /></button>
+        </div>
+      ))}
+      {arr.length < 3 && (
+        <PhotoUploader sb={sb} value="" onChange={u => onChange([...arr, u].filter(Boolean))} />
+      )}
+      <div className="text-[11px] text-neutral-600">{arr.length}/3 fotos</div>
+    </div>
+  );
+}
+
 function ProductsTab({ sb, products, onAdd, onUpdate, onDelete }) {
-  const [form, setForm] = useState({ name: '', category: '', cost: '', retail: '', wholesale: '', minStock: 3, colors: '', photoUrl: '' });
+  const [form, setForm] = useState({ name: '', category: '', cost: '', retail: '', wholesale: '', minStock: 3, colors: '', photos: [], description: '', notes: '' });
   const [editing, setEditing] = useState(null);
 
   const submit = (e) => {
@@ -619,9 +644,10 @@ function ProductsTab({ sb, products, onAdd, onUpdate, onDelete }) {
     onAdd({
       id: uid('prod'), name: form.name, category: form.category || 'Geral',
       cost: Number(form.cost) || 0, retail: Number(form.retail) || 0, wholesale: Number(form.wholesale) || 0,
-      minStock: Number(form.minStock) || 3, variants, photoUrl: form.photoUrl || ''
+      minStock: Number(form.minStock) || 3, variants, photos: form.photos || [],
+      description: form.description || '', notes: form.notes || ''
     });
-    setForm({ name: '', category: '', cost: '', retail: '', wholesale: '', minStock: 3, colors: '', photoUrl: '' });
+    setForm({ name: '', category: '', cost: '', retail: '', wholesale: '', minStock: 3, colors: '', photos: [], description: '', notes: '' });
   };
 
   return (
@@ -635,7 +661,9 @@ function ProductsTab({ sb, products, onAdd, onUpdate, onDelete }) {
           <Field label="Preço varejo"><input type="number" step="0.01" className="fw-input" value={form.retail} onChange={e => setForm(f => ({ ...f, retail: e.target.value }))} /></Field>
           <Field label="Preço atacado"><input type="number" step="0.01" className="fw-input" value={form.wholesale} onChange={e => setForm(f => ({ ...f, wholesale: e.target.value }))} /></Field>
           <Field label="Estoque mínimo por variação"><input type="number" className="fw-input" value={form.minStock} onChange={e => setForm(f => ({ ...f, minStock: e.target.value }))} /></Field>
-          <Field label="Foto do produto (opcional)"><PhotoUploader sb={sb} value={form.photoUrl} onChange={url => setForm(f => ({ ...f, photoUrl: url }))} /></Field>
+          <Field label="Composição/tecido (opcional)"><input className="fw-input" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Ex: 80% poliamida, 20% elastano" /></Field>
+          <Field label="Observações (opcional)"><input className="fw-input" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Ex: modelagem justa, veste menor" /></Field>
+          <div className="col-span-3"><Field label="Fotos do produto (até 3, opcional)"><MultiPhotoUploader sb={sb} photos={form.photos} onChange={photos => setForm(f => ({ ...f, photos }))} /></Field></div>
           <div className="col-span-3 flex justify-end"><button className="fw-btn" type="submit"><Plus size={14} />Adicionar produto</button></div>
         </form>
       </Section>
@@ -648,8 +676,11 @@ function ProductsTab({ sb, products, onAdd, onUpdate, onDelete }) {
             {products.map(p => (
               <tr key={p.id}>
                 <td>
-                  {p.photoUrl ? (
-                    <img src={p.photoUrl} alt="" className="w-9 h-9 object-cover rounded border border-neutral-700" />
+                  {p.photos && p.photos[0] ? (
+                    <div className="relative w-9 h-9">
+                      <img src={p.photos[0]} alt="" className="w-9 h-9 object-cover rounded border border-neutral-700" />
+                      {p.photos.length > 1 && <span className="absolute -bottom-1 -right-1 bg-white text-black text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{p.photos.length}</span>}
+                    </div>
                   ) : (
                     <div className="w-9 h-9 rounded border border-neutral-800 flex items-center justify-center text-neutral-700"><ImageIcon size={14} /></div>
                   )}
@@ -694,7 +725,7 @@ function CatalogTab({ products, settings, onSaveSettings, onPublish, publishStat
     catch (e) { /* ignore */ }
   };
 
-  const withPhoto = products.filter(p => p.photoUrl).length;
+  const withPhoto = products.filter(p => p.photos && p.photos.length > 0).length;
 
   return (
     <div>
@@ -709,7 +740,7 @@ function CatalogTab({ products, settings, onSaveSettings, onPublish, publishStat
       <Section title="Publicar catálogo">
         <div className="bg-neutral-950 border border-neutral-800 p-4">
           <div className="text-[13px] text-neutral-300 mb-3">
-            {products.length} produto(s) cadastrado(s), {withPhoto} com foto. Publicar atualiza a vitrine pública com o nome, a foto e o preço de varejo de cada produto.
+            {products.length} produto(s) cadastrado(s), {withPhoto} com foto. Publicar atualiza a vitrine pública com fotos, descrição, cores/tamanhos disponíveis e preço de varejo de cada produto.
           </div>
           <button onClick={onPublish} disabled={!waNumber || publishState === 'publishing'} className="fw-btn mb-4">
             <Check size={14} />{publishState === 'publishing' ? 'Publicando...' : 'Publicar catálogo agora'}
