@@ -90,7 +90,8 @@ function uid(prefix = 'id') {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
 }
 function formatBRL(v) {
-  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const n = Number(v) || 0;
+  return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function monthKey(dateStr) { return (dateStr || '').slice(0, 7); }
@@ -132,6 +133,7 @@ function Fonts() {
         border-radius: 4px; padding: 6px 10px; font-size: 13px; outline: none;
       }
       .fw-input:focus { border-color: rgb(255 255 255); }
+      .fw-input option { color: #111111; background: #ffffff; }
       .fw-btn {
         background: rgb(255 255 255); color: rgb(0 0 0); font-weight: 700; font-size: 13px;
         padding: 7px 14px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px;
