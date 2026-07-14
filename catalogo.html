@@ -39,6 +39,7 @@ const { useState, useEffect, useMemo } = React;
 const SUPABASE_URL = 'https://xjeyykvousnpxvjeourn.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZXl5a3ZvdXNucHh2amVvdXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMTA1NDYsImV4cCI6MjA5OTU4NjU0Nn0.Oq9Fy4fNvMz1459mKA_dP71RWU0udKSABumBHaJBGRg';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const SHARED_STORE_ID = '39fa249d-9ca3-45d4-a3ad-de8cd73bcccf';
 
 function formatBRL(v) {
   return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -107,7 +108,7 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const { data, error } = await sb.from('catalog_public').select('*').limit(1).maybeSingle();
+        const { data, error } = await sb.from('catalog_public').select('*').eq('user_id', SHARED_STORE_ID).maybeSingle();
         if (error) throw error;
         setCatalog(data || null);
       } catch (e) {
