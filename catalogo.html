@@ -117,6 +117,29 @@ function Fonts() {
         .welcome-card { animation: welcomeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
       }
       @keyframes welcomeIn { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .brand-fade { animation: brandFade 8s ease-in-out infinite; }
+        .slogan-fade { animation: sloganFade 8s ease-in-out infinite; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .brand-fade { opacity: 1; }
+        .slogan-fade { opacity: 0; display: none; }
+      }
+      @keyframes brandFade {
+        0% { opacity: 1; }
+        37.5% { opacity: 1; }
+        50% { opacity: 0; }
+        87.5% { opacity: 0; }
+        100% { opacity: 1; }
+      }
+      @keyframes sloganFade {
+        0% { opacity: 0; }
+        37.5% { opacity: 0; }
+        50% { opacity: 1; }
+        87.5% { opacity: 1; }
+        100% { opacity: 0; }
+      }
     `}</style>
   );
 }
@@ -422,6 +445,21 @@ function App() {
         <p className="f-body text-[14px] text-neutral-400 mt-4 max-w-md leading-relaxed">
           Navegue pela coleção completa da loja — fotos, tamanhos e cores de cada peça, tudo em um só lugar.
         </p>
+
+        <div
+          className="relative w-full flex items-center justify-center overflow-hidden mt-8"
+          style={{ height: '52px', backgroundColor: '#0a0a0a', borderTop: '1px solid #222', borderBottom: '1px solid #222' }}
+        >
+          <img
+            src={LOGO_DATA_URI} alt="movia."
+            className="brand-fade absolute"
+            style={{ height: '20px', width: 'auto' }}
+          />
+          <span
+            className="slogan-fade absolute f-display font-extrabold text-white text-center px-6"
+            style={{ fontSize: 'clamp(15px, 3vw, 20px)' }}
+          >Seu movimento, sua evolução!</span>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2.5 mt-7">
           <input
