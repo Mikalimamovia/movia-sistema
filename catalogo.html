@@ -106,6 +106,15 @@ function Fonts() {
       .size-pill.selected { background: rgb(15 15 13); color: rgb(255 255 255); border-color: rgb(15 15 13); }
       .size-pill:hover:not(.selected) { border-color: rgb(140 140 135); }
 
+      .details-toggle {
+        font-family: 'Inter', sans-serif; font-size: 12px; color: rgb(120 120 115);
+        text-decoration: underline; text-underline-offset: 2px;
+        background: none; border: none; padding: 0; cursor: pointer;
+        display: inline-block; transform-origin: left center;
+        transition: transform 0.25s ease, color 0.2s ease;
+      }
+      .details-toggle:hover { transform: scale(1.06); color: rgb(15 15 13); }
+
       @media (prefers-reduced-motion: no-preference) {
         .look-card { animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
         .look-photo img { transition: transform 1.1s cubic-bezier(0.16, 1, 0.3, 1); }
@@ -219,6 +228,7 @@ function LookCard({ product, onAddToCart, onOpenLightbox, activeSourceKey }) {
   const [selectedColor, setSelectedColor] = useState(availableColors[0] || null);
   const [selectedSize, setSelectedSize] = useState(null);
   const [qty, setQty] = useState(1);
+  const [showDetails, setShowDetails] = useState(false);
 
   const sizesForColor = variants.filter(v => v.color === selectedColor && v.inStock);
   const canAdd = selectedColor && selectedSize && !allOutOfStock;
@@ -274,8 +284,20 @@ function LookCard({ product, onAddToCart, onOpenLightbox, activeSourceKey }) {
       <div className="pt-4">
         {product.category && <div className="eyebrow mb-1.5">{product.category}</div>}
         <div className="f-display text-[19px] leading-snug font-semibold" style={{ color: 'rgb(15 15 13)' }}>{product.name}</div>
-        {product.description && <div className="f-body text-[13px] text-neutral-600 leading-relaxed mt-1.5">{product.description}</div>}
-        {product.notes && <div className="f-body text-[12px] text-neutral-600 italic mt-1">{product.notes}</div>}
+        {(product.description || product.notes) && (
+          <div className="mt-1.5">
+            <button
+              onClick={() => setShowDetails(s => !s)}
+              className="details-toggle"
+            >Detalhes da peça</button>
+            {showDetails && (
+              <div className="mt-2">
+                {product.description && <div className="f-body text-[13px] text-neutral-600 leading-relaxed">{product.description}</div>}
+                {product.notes && <div className="f-body text-[12px] text-neutral-600 italic mt-1">{product.notes}</div>}
+              </div>
+            )}
+          </div>
+        )}
 
         {availableColors.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-4">
