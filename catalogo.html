@@ -371,6 +371,7 @@ function App() {
   const [payment, setPayment] = useState('pix');
   const [clientName, setClientName] = useState('');
   const [lightbox, setLightbox] = useState(null);
+  const [cartCollapsed, setCartCollapsed] = useState(false);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState(null);
   const [showWelcome, setShowWelcome] = useState(() => {
@@ -589,10 +590,33 @@ function App() {
         onNav={navLightbox}
       />
 
-      {cart.length > 0 && (
+      {cart.length > 0 && cartCollapsed && (
+        <button
+          onClick={() => setCartCollapsed(false)}
+          className="fixed bottom-5 right-5 z-20 flex items-center gap-2 shadow-lg"
+          style={{ backgroundColor: 'rgb(15 15 13)', color: '#fff', borderRadius: '999px', padding: '12px 18px', border: 'none' }}
+        >
+          <span className="f-body text-[13px] font-medium">Sacola</span>
+          <span
+            className="fw-mono"
+            style={{ backgroundColor: '#e11d2e', color: '#fff', borderRadius: '999px', minWidth: '20px', height: '20px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px', fontWeight: 700 }}
+          >{itemCount}</span>
+          <span style={{ fontSize: '14px' }}>▲</span>
+        </button>
+      )}
+
+      {cart.length > 0 && !cartCollapsed && (
         <div className="cart-drawer fixed bottom-0 left-0 right-0 z-20 border-t border-neutral-200" style={{ backgroundColor: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(8px)' }}>
           <div className="max-w-6xl mx-auto p-5 sm:p-6">
-            <div className="eyebrow mb-3">sacola · {itemCount} {itemCount === 1 ? 'peça' : 'peças'}</div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="eyebrow">sacola · {itemCount} {itemCount === 1 ? 'peça' : 'peças'}</div>
+              <button
+                onClick={() => setCartCollapsed(true)}
+                aria-label="Recolher sacola"
+                className="text-neutral-500 hover:text-black transition-colors"
+                style={{ fontSize: '16px', lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer' }}
+              >▼</button>
+            </div>
             <div className="max-h-28 overflow-y-auto mb-4 space-y-1.5">
               {cart.map((item, idx) => (
                 <div key={idx} className="flex items-center justify-between text-[13px] text-neutral-700">
