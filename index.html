@@ -79,6 +79,7 @@ const TrendingUp = (p) => <Icon {...p}><polyline points="23 6 13.5 15.5 8.5 10.5
 const TrendingDown = (p) => <Icon {...p}><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></Icon>;
 const Calculator = (p) => <Icon {...p}><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10.5" x2="8.01" y2="10.5"/><line x1="12" y1="10.5" x2="12.01" y2="10.5"/><line x1="16" y1="10.5" x2="16.01" y2="10.5"/><line x1="8" y1="14.5" x2="8.01" y2="14.5"/><line x1="12" y1="14.5" x2="12.01" y2="14.5"/><line x1="16" y1="14.5" x2="16.01" y2="14.5"/><line x1="8" y1="18.5" x2="8.01" y2="18.5"/><line x1="12" y1="18.5" x2="12.01" y2="18.5"/><line x1="16" y1="18.5" x2="16.01" y2="18.5"/></Icon>;
 const ImageIcon = (p) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></Icon>;
+const TagIcon = (p) => <Icon {...p}><path d="M20.59 13.41 11 3.83 3.83 11 13.41 20.59a2 2 0 0 0 2.83 0l4.35-4.35a2 2 0 0 0 0-2.83Z"/><circle cx="7.5" cy="7.5" r="1.5"/></Icon>;
 const MessageCircle = (p) => <Icon {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></Icon>;
 
 
@@ -116,6 +117,7 @@ const NAV = [
   { key: 'expenses', label: 'Saídas', icon: TrendingDown },
   { key: 'orders', label: 'Pedidos', icon: ClipboardList },
   { key: 'catalog', label: 'Catálogo', icon: ImageIcon },
+  { key: 'coupons', label: 'Cupons', icon: TagIcon },
   { key: 'reports', label: 'Relatórios', icon: BarChart3 },
 ];
 
@@ -489,6 +491,9 @@ function App({ sb, session, onSignOut }) {
             publishState={publishState}
           />
         )}
+        {tab === 'coupons' && (
+          <CouponsTab sb={sb} />
+        )}
         {tab === 'reports' && (
           <ReportsTab sales={data.sales} purchases={data.purchases} finance={data.finance} products={data.products} />
         )}
@@ -826,6 +831,134 @@ function CatalogTab({ products, settings, onSaveSettings, onPublish, publishStat
           )}
         </div>
       </Section>
+    </div>
+  );
+}
+
+// ---------- Coupons ----------
+const EMPTY_COUPON_FORM = { code: '', discount_type: 'percent', discount_value: '', valid_until: '', max_uses: '' };
+
+function CouponsTab({ sb }) {
+  const [coupons, setCoupons] = useState(null);
+  const [form, setForm] = useState(EMPTY_COUPON_FORM);
+  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    try {
+      const { data, error } = await sb.from('coupons').select('*').eq('user_id', SHARED_STORE_ID).order('created_at', { ascending: false });
+      if (error) throw error;
+      setCoupons(data || []);
+    } catch (e) {
+      console.error('Erro ao carregar cupons:', e);
+      setCoupons([]);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const startEdit = (c) => {
+    setEditingId(c.id);
+    setForm({
+      code: c.code, discount_type: c.discount_type, discount_value: c.discount_value,
+      valid_until: c.valid_until || '', max_uses: c.max_uses ?? '',
+    });
+  };
+  const cancelEdit = () => { setEditingId(null); setForm(EMPTY_COUPON_FORM); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!form.code.trim() || form.discount_value === '') return;
+    const payload = {
+      code: form.code.trim().toUpperCase(),
+      discount_type: form.discount_type,
+      discount_value: Number(form.discount_value),
+      valid_until: form.valid_until || null,
+      max_uses: form.max_uses === '' ? null : Number(form.max_uses),
+    };
+    try {
+      if (editingId) {
+        const { error } = await sb.from('coupons').update(payload).eq('id', editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await sb.from('coupons').insert({ ...payload, user_id: SHARED_STORE_ID, active: true, current_uses: 0 });
+        if (error) throw error;
+      }
+      cancelEdit();
+      load();
+    } catch (e) {
+      setError('Erro ao salvar cupom: ' + (e.message || 'tente novamente'));
+    }
+  };
+
+  const toggleActive = async (c) => {
+    await sb.from('coupons').update({ active: !c.active }).eq('id', c.id);
+    load();
+  };
+
+  const remove = async (id) => {
+    await sb.from('coupons').delete().eq('id', id);
+    load();
+  };
+
+  if (coupons === null) {
+    return <div className="text-neutral-600 text-sm">Carregando cupons...</div>;
+  }
+
+  return (
+    <div>
+      <Section title={editingId ? 'Editando cupom' : 'Cadastro de cupons'}>
+        <form onSubmit={submit} className="bg-neutral-950 border border-neutral-800 p-4 grid grid-cols-3 gap-3 mb-4">
+          <Field label="Código do cupom"><input className="fw-input" style={{ textTransform: 'uppercase' }} value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '') }))} placeholder="MOVIA10" /></Field>
+          <Field label="Tipo de desconto">
+            <select className="fw-input" value={form.discount_type} onChange={e => setForm(f => ({ ...f, discount_type: e.target.value }))}>
+              <option value="percent">Percentual (%)</option>
+              <option value="fixed">Valor fixo (R$)</option>
+            </select>
+          </Field>
+          <Field label={form.discount_type === 'percent' ? 'Percentual de desconto' : 'Valor de desconto (R$)'}>
+            <input type="number" step="0.01" className="fw-input" value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: e.target.value }))} />
+          </Field>
+          <Field label="Validade (opcional)"><input type="date" className="fw-input" value={form.valid_until} onChange={e => setForm(f => ({ ...f, valid_until: e.target.value }))} /></Field>
+          <Field label="Quantidade máxima de usos (opcional)"><input type="number" min="1" className="fw-input" value={form.max_uses} onChange={e => setForm(f => ({ ...f, max_uses: e.target.value }))} placeholder="Deixe em branco para ilimitado" /></Field>
+          <div className="flex items-end gap-3">
+            {editingId && <button type="button" onClick={cancelEdit} className="fw-btn-ghost">Cancelar</button>}
+            <button className="fw-btn" type="submit">
+              {editingId ? <Check size={14} /> : <Plus size={14} />}
+              {editingId ? 'Salvar' : 'Adicionar cupom'}
+            </button>
+          </div>
+          {error && <div className="col-span-3 text-[12px] text-white bg-neutral-900 border border-white p-2">{error}</div>}
+        </form>
+      </Section>
+
+      <div className="bg-neutral-950 border border-neutral-800 overflow-x-auto">
+        <table className="w-full fw-table">
+          <thead><tr><th>Cupom</th><th>Cadastro</th><th>Validade</th><th>Desconto</th><th>Usos</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {coupons.length === 0 && <tr><td colSpan={7} className="text-neutral-600 text-center py-6">Nenhum cupom cadastrado.</td></tr>}
+            {coupons.map(c => (
+              <tr key={c.id}>
+                <td className="font-medium text-neutral-100 fw-mono">{c.code}</td>
+                <td>{(c.created_at || '').slice(0, 10)}</td>
+                <td>{c.valid_until || 'sem validade'}</td>
+                <td>{c.discount_type === 'percent' ? `${c.discount_value}%` : formatBRL(c.discount_value)}</td>
+                <td>{c.current_uses}{c.max_uses != null ? ` / ${c.max_uses}` : ' / ∞'}</td>
+                <td>
+                  <button onClick={() => toggleActive(c)} className="fw-btn-ghost">
+                    {c.active ? 'Ativo' : 'Inativo'}
+                  </button>
+                </td>
+                <td className="flex gap-1">
+                  <button onClick={() => startEdit(c)} className="fw-btn-ghost"><Pencil size={13} /></button>
+                  <button onClick={() => remove(c.id)} className="fw-btn-ghost"><Trash2 size={13} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
