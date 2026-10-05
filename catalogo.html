@@ -290,7 +290,7 @@ function LookCard({ product, onAddToCart, onOpenLightbox, activeSourceKey }) {
       </div>
 
       {photos.length > 1 && (
-        <div className="flex gap-1.5 mt-2">
+        <div className="flex flex-wrap gap-1.5 mt-2">
           {photos.map((ph, i) => (
             <img
               key={i} src={ph} alt=""
