@@ -53,6 +53,8 @@ const {
 const SUPABASE_URL = 'https://xjeyykvousnpxvjeourn.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZXl5a3ZvdXNucHh2amVvdXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMTA1NDYsImV4cCI6MjA5OTU4NjU0Nn0.Oq9Fy4fNvMz1459mKA_dP71RWU0udKSABumBHaJBGRg';
 
+const VAPID_PUBLIC_KEY = 'BIHuzCF4l3LyYf0S88b4iuzsP6kMUtLXhAYo2AQ1M7RnaYEUEaaPhOu2Up6Ge5qd7IgGTUfJMxiJfCPvSdnXTPw'; // chave pública dos avisos (a privada fica só no Supabase)
+
 const CONFIG_OK = /^https?:\/\//.test(SUPABASE_URL) && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY.length > 20 && SUPABASE_ANON_KEY.indexOf('COLE_AQUI') === -1;
 const sb = CONFIG_OK ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
@@ -184,6 +186,39 @@ async function showLocalNotification(title, body, tag) {
     new Notification(title, opts);
     return true;
   } catch (e) { console.warn('Notificação falhou:', e); return false; }
+}
+function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && notifSupported(); }
+function urlB64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
+}
+// Cadastra este aparelho no servidor para receber os avisos com o app fechado
+async function syncPushSubscription() {
+  if (!pushSupported()) return { ok: false, error: 'Este aparelho/navegador não suporta avisos com o app fechado.' };
+  if (!sb) return { ok: false, error: 'Sem conexão com o servidor.' };
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY) });
+    const j = sub.toJSON();
+    const { error } = await sb.from('push_subscriptions').upsert(
+      { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, user_agent: navigator.userAgent.slice(0, 200) },
+      { onConflict: 'endpoint' }
+    );
+    if (error) return { ok: false, error: 'Servidor ainda não configurado (' + error.message + ').' };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: 'Não foi possível ativar: ' + (e && e.message ? e.message : e) };
+  }
+}
+async function sendPushTest() {
+  try {
+    const { data, error } = await sb.functions.invoke('birthday-push', { body: { test: true } });
+    if (error) return 'Falhou: ' + (error.message || error);
+    if (data && data.ok === false) return 'Falhou: ' + data.error;
+    return (data && data.sent > 0) ? 'Enviado! Em instantes chega a notificação.' : ((data && data.reason) || 'Nada enviado.');
+  } catch (e) { return 'Falhou: ' + (e && e.message ? e.message : e); }
 }
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW:', e)); });
@@ -710,6 +745,8 @@ function BirthdaysCard({ clients, storeName }) {
 function DeviceCard() {
   const [installEvt, setInstallEvt] = useState(null);
   const [perm, setPerm] = useState(notifSupported() ? Notification.permission : 'unsupported');
+  const [push, setPush] = useState({ state: 'idle', msg: '' });
+  const [testMsg, setTestMsg] = useState('');
   const standalone = isStandalone();
   const ios = isIOS();
 
@@ -727,10 +764,20 @@ function DeviceCard() {
     try { await installEvt.userChoice; } catch (e) {}
     setInstallEvt(null);
   };
-  const enableNotif = async () => {
-    try { const r = await Notification.requestPermission(); setPerm(r); if (r === 'granted') showLocalNotification('Avisos ativados ✔', 'Você será avisada dos aniversários quando abrir o sistema.', 'bday-test'); }
-    catch (e) { setPerm(Notification.permission); }
+  const registerPush = async () => {
+    setPush({ state: 'working', msg: '' });
+    const r = await syncPushSubscription();
+    setPush(r.ok ? { state: 'ok', msg: '' } : { state: 'error', msg: r.error });
   };
+  // aparelho que já tinha permissão: garante o cadastro no servidor (silencioso)
+  useEffect(() => { if (perm === 'granted' && pushSupported()) registerPush(); }, []);
+  const enableNotif = async () => {
+    try {
+      const r = await Notification.requestPermission(); setPerm(r);
+      if (r === 'granted') { await registerPush(); }
+    } catch (e) { setPerm(Notification.permission); }
+  };
+  const runTest = async () => { setTestMsg('enviando...'); setTestMsg(await sendPushTest()); };
 
   // iPhone só permite notificação depois de instalar na tela inicial
   const iosNeedsInstall = ios && !standalone;
@@ -760,7 +807,23 @@ function DeviceCard() {
           ) : iosNeedsInstall ? (
             <div className="text-[12px] text-neutral-500">No iPhone, instale o app na tela inicial primeiro; depois abra por lá e ative os avisos.</div>
           ) : perm === 'granted' ? (
-            <div className="text-[12px] text-neutral-400">✔ Ativados neste aparelho. O aviso aparece quando você abre o sistema no dia do aniversário.</div>
+            <div className="flex flex-col gap-2">
+              {push.state === 'ok' ? (
+                <div className="text-[12px] text-neutral-400">✔ Ativados neste aparelho. Você recebe o aviso às 8h no dia do aniversário, mesmo com o app fechado.</div>
+              ) : push.state === 'working' ? (
+                <div className="text-[12px] text-neutral-500">ativando...</div>
+              ) : push.state === 'error' ? (
+                <div className="text-[12px] text-neutral-400">⚠ {push.msg} <span className="text-neutral-500">O aviso ainda aparece quando você abre o sistema no dia do aniversário.</span> <button onClick={registerPush} className="underline text-neutral-300">tentar de novo</button></div>
+              ) : (
+                <div className="text-[12px] text-neutral-400">Permissão concedida.</div>
+              )}
+              {push.state === 'ok' && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <button onClick={runTest} className="fw-btn-ghost">Enviar aviso de teste</button>
+                  {testMsg && <span className="text-[12px] text-neutral-400">{testMsg}</span>}
+                </div>
+              )}
+            </div>
           ) : perm === 'denied' ? (
             <div className="text-[12px] text-neutral-500">Bloqueados. Libere nas configurações do navegador/aplicativo para este site.</div>
           ) : (
