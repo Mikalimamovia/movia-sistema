@@ -520,6 +520,15 @@ function App() {
       }
       const msg = encodeURIComponent(buildMessage());
       const phone = catalog.whatsapp_number.replace(/\D/g, '');
+      // Avisa a loja (notificação no celular). Não espera resposta para não atrasar a abertura do WhatsApp.
+      try {
+        sb.rpc('notify_new_order', {
+          p_customer: clientName.trim(),
+          p_items: cart.reduce((n, i) => n + i.qty, 0),
+          p_total: total,
+          p_summary: buildMessage()
+        }).then(() => {}, () => {});
+      } catch (e) { /* ignora */ }
       window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
     } catch (e) {
       console.error('Erro ao enviar pedido:', e);
