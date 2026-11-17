@@ -25,6 +25,15 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// Aviso vindo do servidor (funciona com o app fechado)
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(d.title || 'movia.', {
+    body: d.body || '', tag: d.tag, icon: 'icon-192.png', badge: 'icon-192.png', data: { url: d.url || 'gestao.html' }
+  }));
+});
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const target = new URL((event.notification.data && event.notification.data.url) || 'gestao.html', self.registration.scope).href;
