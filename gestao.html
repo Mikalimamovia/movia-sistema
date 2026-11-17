@@ -31,13 +31,22 @@
 <body>
 <div id="root"></div>
 <script>
-  window.addEventListener('error', function (e) {
+  // Mostra o erro na tela só se o sistema não chegou a abrir. Erros "mascarados" (Script error., sem arquivo/linha)
+  // com o sistema já aberto são ignorados — antes eles apagavam a tela inteira.
+  function showFatal(msg, where) {
     var root = document.getElementById('root');
     root.innerHTML = '<div style="color:#fff;background:#000;font-family:monospace;padding:24px;white-space:pre-wrap;">'
-      + '⚠ Erro ao carregar o sistema:\n\n' + (e.message || e) + '\n\nArquivo: ' + (e.filename || '-') + ':' + (e.lineno || '-')
-      + '\n\nIsso costuma acontecer quando algum script externo (CDN) não carregou — verifique sua conexão com a internet e tente recarregar a página.'
+      + '⚠ Erro ao carregar o sistema:\n\n' + msg + (where ? '\n\n' + where : '')
+      + '\n\nSe aparecer "Script error", feche e abra de novo; se continuar, confira a conexão com a internet (os scripts vêm de servidores externos).'
       + '</div>';
+  }
+  window.addEventListener('error', function (e) {
+    var root = document.getElementById('root');
+    var masked = !e.filename && !e.lineno;
+    if (root && root.childElementCount > 0 && masked) { console.warn('Erro sem detalhes ignorado:', e.message); return; }
+    showFatal((e.message || e) + '', 'Arquivo: ' + (e.filename || '-') + ':' + (e.lineno || '-') + (e.error && e.error.stack ? '\n' + String(e.error.stack).slice(0, 600) : ''));
   });
+  window.addEventListener('unhandledrejection', function (e) { console.warn('Promessa rejeitada:', e.reason); });
 </script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo } = React;
@@ -2381,8 +2390,27 @@ function AuthGate({ sb }) {
   return <App sb={sb} session={session} onSignOut={() => sb.auth.signOut()} />;
 }
 
+// Pega erros de tela com a mensagem real (em vez de "Script error.")
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { console.error('Erro de tela:', err, info); }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const e = this.state.err;
+    return (
+      <div className="min-h-screen bg-black text-neutral-200 p-6 fw-body">
+        <div className="text-white font-semibold mb-2">⚠ O sistema encontrou um erro</div>
+        <div className="text-[13px] text-neutral-400 mb-3">Seus dados não foram perdidos. Toque em recarregar; se o erro voltar, mande o texto abaixo.</div>
+        <pre className="text-[11px] text-neutral-400 bg-neutral-950 border border-neutral-800 p-3 whitespace-pre-wrap break-words">{String((e && e.message) || e)}{e && e.stack ? '\n' + String(e.stack).slice(0, 500) : ''}</pre>
+        <button onClick={() => location.reload()} className="fw-btn mt-4">Recarregar</button>
+      </div>
+    );
+  }
+}
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(CONFIG_OK ? <AuthGate sb={sb} /> : <ConfigNeeded />);
+root.render(<ErrorBoundary>{CONFIG_OK ? <AuthGate sb={sb} /> : <ConfigNeeded />}</ErrorBoundary>);
 </script>
 </body>
 </html>
