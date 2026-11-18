@@ -1421,6 +1421,70 @@ function CouponsTab({ sb }) {
   );
 }
 
+// ---------- Datas de nascimento recebidas pelo catálogo ----------
+function BirthdayInbox({ clients, onAdd, onUpdate }) {
+  const [rows, setRows] = useState([]);
+  const norm = (t) => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+  const load = async () => {
+    try {
+      const { data, error } = await sb.from('catalog_orders').select('id,customer,birth_date,created_at')
+        .not('birth_date', 'is', null).is('birth_imported_at', null).order('created_at', { ascending: false }).limit(100);
+      if (!error && data) setRows(data);
+    } catch (e) { /* tabela ainda não atualizada: não mostra nada */ }
+  };
+  useEffect(() => { load(); }, []);
+
+  // uma linha por cliente (a data mais recente), guardando todos os ids para dar baixa juntos
+  const groups = useMemo(() => {
+    const map = new Map();
+    rows.forEach(r => {
+      const k = norm(r.customer);
+      if (!k) return;
+      if (!map.has(k)) map.set(k, { key: k, name: r.customer.trim(), birth: r.birth_date, at: r.created_at, ids: [] });
+      map.get(k).ids.push(r.id);
+    });
+    return [...map.values()];
+  }, [rows]);
+
+  const done = async (ids) => {
+    try { await sb.from('catalog_orders').update({ birth_imported_at: new Date().toISOString() }).in('id', ids); } catch (e) {}
+    setRows(r => r.filter(x => !ids.includes(x.id)));
+  };
+  const save = (g, match) => {
+    if (match) onUpdate(match.id, { birthDate: g.birth });
+    else onAdd({ id: uid('client'), name: g.name, phone: '', type: 'varejo', birthDate: g.birth, createdAt: todayISO() });
+    done(g.ids);
+  };
+
+  if (groups.length === 0) return null;
+  return (
+    <Section title="🎂 Datas recebidas pelo catálogo">
+      <div className="bg-neutral-950 border border-neutral-800 mb-4">
+        <div className="px-4 py-2 text-[11px] text-neutral-500 border-b border-neutral-900">Clientes que marcaram o aceite de uso da data apenas para lembretes de aniversário.</div>
+        {groups.map(g => {
+          const match = clients.find(c => norm(c.name) === g.key);
+          return (
+            <div key={g.key} className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-neutral-900 last:border-b-0">
+              <div className="flex-1 min-w-[180px]">
+                <div className="text-sm text-neutral-100 font-medium">{g.name}</div>
+                <div className="text-[11px] text-neutral-500">
+                  {formatBirth(g.birth)}
+                  {match ? (match.birthDate && match.birthDate !== g.birth ? ' · cadastro tem ' + formatBirth(match.birthDate) : match.birthDate ? ' · já consta no cadastro' : ' · cliente já cadastrada') : ' · ainda não cadastrada'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => save(g, match)} className="fw-btn">{match ? (match.birthDate ? 'Atualizar data' : 'Salvar data') : 'Cadastrar cliente'}</button>
+                <button onClick={() => done(g.ids)} className="fw-btn-ghost" aria-label="Descartar"><X size={13} /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
 // ---------- Clients ----------
 function ClientsTab({ clients, onAdd, onUpdate, onDelete, storeName }) {
   const blank = { name: '', phone: '', type: 'varejo', birthDate: '' };
@@ -1453,6 +1517,7 @@ function ClientsTab({ clients, onAdd, onUpdate, onDelete, storeName }) {
 
   return (
     <div>
+      <BirthdayInbox clients={clients} onAdd={onAdd} onUpdate={onUpdate} />
       <Section title="Cadastro de clientes">
         <form onSubmit={submit} className="bg-neutral-950 border border-neutral-800 p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
           <Field label="Nome"><input className="fw-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
