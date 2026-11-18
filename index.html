@@ -36,7 +36,7 @@
   });
 </script>
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 const { flushSync } = ReactDOM;
 
 const SUPABASE_URL = 'https://xjeyykvousnpxvjeourn.supabase.co';
@@ -105,6 +105,12 @@ function Fonts() {
       }
       .size-pill.selected { background: rgb(15 15 13); color: rgb(255 255 255); border-color: rgb(15 15 13); }
       .size-pill:hover:not(.selected) { border-color: rgb(140 140 135); }
+      /* opção esgotada: continua visível, riscada na diagonal e sem clique */
+      .size-pill.soldout {
+        color: rgb(165 165 160); border-color: rgb(228 228 224); cursor: not-allowed;
+        background: linear-gradient(to top right, transparent calc(50% - 0.7px), rgb(185 185 180) 50%, transparent calc(50% + 0.7px));
+      }
+      .size-pill.soldout:hover { border-color: rgb(228 228 224); }
 
       .details-toggle {
         font-family: 'Inter', sans-serif; font-size: 12px; color: rgb(120 120 115);
@@ -246,12 +252,21 @@ function LookCard({ product, onAddToCart, onOpenLightbox, activeSourceKey }) {
   const variants = product.variants || [];
   const allOutOfStock = variants.length > 0 && variants.every(v => !v.inStock);
   const availableColors = [...new Set(variants.filter(v => v.inStock).map(v => v.color))];
+  const allColors = [...new Set(variants.map(v => v.color))]; // inclui as esgotadas (aparecem riscadas)
   const [selectedColor, setSelectedColor] = useState(availableColors[0] || null);
+  const [soldMsg, setSoldMsg] = useState('');
+  const soldTimer = useRef(null);
+  const showSold = (text) => {
+    setSoldMsg(text);
+    clearTimeout(soldTimer.current);
+    soldTimer.current = setTimeout(() => setSoldMsg(''), 2500);
+  };
   const [selectedSize, setSelectedSize] = useState(null);
   const [qty, setQty] = useState(1);
   const [showDetails, setShowDetails] = useState(false);
 
-  const sizesForColor = variants.filter(v => v.color === selectedColor && v.inStock);
+  const sizesForColor = variants.filter(v => v.color === selectedColor);
+  const hasSoldOut = variants.some(v => !v.inStock);
   const canAdd = selectedColor && selectedSize && !allOutOfStock;
   const sourceKey = `${product.id}-0`;
 
@@ -320,15 +335,20 @@ function LookCard({ product, onAddToCart, onOpenLightbox, activeSourceKey }) {
           </div>
         )}
 
-        {availableColors.length > 0 && (
+        {allColors.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-4">
-            {availableColors.map(c => (
-              <button
-                key={c}
-                onClick={() => { setSelectedColor(c); setSelectedSize(null); }}
-                className={`size-pill ${selectedColor === c ? 'selected' : ''}`}
-              >{c}</button>
-            ))}
+            {allColors.map(c => {
+              const inStock = availableColors.includes(c);
+              return (
+                <button
+                  key={c}
+                  aria-disabled={!inStock}
+                  title={inStock ? c : c + ' — esgotado'}
+                  onClick={() => { if (!inStock) { showSold(c + ' esgotada no momento'); return; } setSelectedColor(c); setSelectedSize(null); setSoldMsg(''); }}
+                  className={`size-pill ${selectedColor === c ? 'selected' : ''} ${inStock ? '' : 'soldout'}`}
+                >{c}</button>
+              );
+            })}
           </div>
         )}
 
@@ -337,10 +357,18 @@ function LookCard({ product, onAddToCart, onOpenLightbox, activeSourceKey }) {
             {sizesForColor.map(v => (
               <button
                 key={v.size}
-                onClick={() => setSelectedSize(v.size)}
-                className={`size-pill ${selectedSize === v.size ? 'selected' : ''}`}
+                aria-disabled={!v.inStock}
+                title={v.inStock ? v.size : v.size + ' — esgotado'}
+                onClick={() => { if (!v.inStock) { showSold('Tamanho ' + v.size + ' esgotado nesta cor'); return; } setSelectedSize(v.size); setSoldMsg(''); }}
+                className={`size-pill ${selectedSize === v.size ? 'selected' : ''} ${v.inStock ? '' : 'soldout'}`}
               >{v.size}</button>
             ))}
+          </div>
+        )}
+
+        {(soldMsg || (hasSoldOut && !allOutOfStock)) && (
+          <div className="f-body text-[11px] mt-2" style={{ color: soldMsg ? 'rgb(15 15 13)' : 'rgb(150 150 145)', minHeight: '16px' }}>
+            {soldMsg || 'Opções riscadas estão esgotadas.'}
           </div>
         )}
 
