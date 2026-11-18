@@ -412,6 +412,13 @@ function App() {
   const [couponMessage, setCouponMessage] = useState('');
   const [couponLoading, setCouponLoading] = useState(false);
   const [sendingOrder, setSendingOrder] = useState(false);
+  const [birthConsent, setBirthConsent] = useState(false);
+  const [birthDate, setBirthDate] = useState('');
+  const [birthError, setBirthError] = useState('');
+  const todayLocalISO = (() => { const d = new Date(); const p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); })();
+  // só vale se a cliente marcou o consentimento, informou o nome e uma data real
+  const birthValid = birthConsent && clientName.trim().length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(birthDate) && birthDate >= '1900-01-01' && birthDate <= todayLocalISO;
+  const birthBR = birthDate.split('-').reverse().join('/');
 
   const applyCoupon = async () => {
     if (!couponCode.trim()) return;
@@ -500,11 +507,17 @@ function App() {
     lines.push(`Total: ${formatBRL(total)}`);
     const paymentLabel = (PAYMENT_METHODS.find(p => p.value === payment) || {}).label || payment;
     lines.push(`Forma de pagamento: ${paymentLabel}`);
+    if (birthValid) lines.push(`Nascimento: ${birthBR} (autorizou o uso apenas para lembretes de aniversário)`);
     return lines.join('\n');
   };
 
   const sendOrder = async () => {
     if (cart.length === 0 || !catalog || !catalog.whatsapp_number || sendingOrder) return;
+    if (birthConsent && !birthValid) {
+      setBirthError(!clientName.trim() ? 'Para enviar a data de nascimento, informe também seu nome.' : 'Informe uma data de nascimento válida — ou desmarque a opção.');
+      return;
+    }
+    setBirthError('');
     setSendingOrder(true);
     try {
       if (appliedCoupon) {
@@ -526,7 +539,9 @@ function App() {
           p_customer: clientName.trim(),
           p_items: cart.reduce((n, i) => n + i.qty, 0),
           p_total: total,
-          p_summary: buildMessage()
+          p_summary: buildMessage(),
+          p_birth_date: birthValid ? birthDate : null,
+          p_birth_consent: birthValid
         }).then(() => {}, () => {});
       } catch (e) { /* ignora */ }
       window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
@@ -719,6 +734,23 @@ function App() {
                   {formatBRL(total)}
                 </div>
               </div>
+            </div>
+            <div className="mb-4 border border-neutral-200 p-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" className="mt-0.5 w-4 h-4 shrink-0" style={{ accentColor: 'rgb(15 15 13)' }}
+                  checked={birthConsent} onChange={e => { setBirthConsent(e.target.checked); setBirthError(''); }} />
+                <span className="f-body text-[12px] text-neutral-700 leading-snug">
+                  🎂 Concordo em informar minha data de nascimento. Ela será usada <b>apenas para enviar lembretes e parabéns de aniversário</b>. (opcional)
+                </span>
+              </label>
+              {birthConsent && (
+                <div className="mt-3">
+                  <input type="date" className="fw-input" aria-label="Data de nascimento" min="1900-01-01" max={todayLocalISO}
+                    value={birthDate} onChange={e => { setBirthDate(e.target.value); setBirthError(''); }} />
+                  {!clientName.trim() && <div className="f-body text-[11px] text-neutral-500 mt-1">Preencha também o seu nome acima.</div>}
+                </div>
+              )}
+              {birthError && <div className="f-body text-[12px] mt-2" style={{ color: 'rgb(180 40 40)' }}>{birthError}</div>}
             </div>
             <button onClick={sendOrder} disabled={sendingOrder} className="btn-primary w-full">
               {sendingOrder ? 'Enviando...' : 'Enviar pedido pelo WhatsApp'}
