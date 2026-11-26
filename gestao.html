@@ -331,6 +331,7 @@ function recWhen(r, today) {
   const f = -n;
   return 'vence ' + formatDM(r.dueDate) + (f === 1 ? ' (amanhã)' : ' (em ' + f + ' dias)');
 }
+const PAY_LABELS = { pix: 'Pix', debito: 'Débito', credito: 'Crédito', crediario: 'Crediário' };
 function buildInstallments(o) {
   const n = Math.max(1, Math.min(24, Number(o.n) || 1));
   const cents = Math.round(o.total * 100);
@@ -340,7 +341,7 @@ function buildInstallments(o) {
     id: uid('rec'), saleId: o.saleId || null, clientId: o.clientId || null, clientName: o.clientName || 'Cliente',
     desc: (o.desc || 'Cobrança') + (n > 1 ? ' (' + (i + 1) + '/' + n + ')' : ''),
     amount: (base + (i === n - 1 ? rem : 0)) / 100,
-    dueDate: addMonthsISO(o.firstDue, i), status: 'open', paidDate: null, financeId: null, createdAt: localISO(),
+    dueDate: (o.dates && o.dates[i]) || addMonthsISO(o.firstDue, i), method: o.method || null, status: 'open', paidDate: null, financeId: null, createdAt: localISO(),
   }));
 }
 // inadimplência: parcelas vencidas e não pagas, agrupadas por cliente
@@ -373,11 +374,12 @@ function agendaSummary(d, iso) {
   const tasks = (d.tasks || []).filter(t => taskOccursOn(t, iso)).sort(byTime);
   const recs = d.receivables || [];
   const dueToday = recs.filter(r => r.status !== 'paid' && r.dueDate === iso);
+  const dueTomorrow = recs.filter(r => r.status !== 'paid' && r.dueDate === addDaysISO(iso, 1));
   const late = recs.filter(r => r.status !== 'paid' && r.dueDate < iso);
   const sum = (arr) => Math.round(arr.reduce((s, r) => s + r.amount, 0) * 100) / 100;
   return {
     tasks, pending: tasks.filter(t => !taskDone(t, iso)), dueToday, late,
-    dueTotal: sum(dueToday), lateTotal: sum(late), lateClients: groupOverdue(recs, iso, d.clients),
+    dueTomorrow, tomorrowTotal: sum(dueTomorrow), dueTotal: sum(dueToday), lateTotal: sum(late), lateClients: groupOverdue(recs, iso, d.clients),
     bdays: birthdaysOnISO(d.clients, iso),
   };
 }
@@ -389,6 +391,7 @@ function agendaDigestText(s, billing = true) {
     lines.push(s.pending.length + (s.pending.length === 1 ? ' tarefa: ' : ' tarefas: ') + names + (s.pending.length > 3 ? '…' : ''));
   }
   if (billing && s.dueToday.length) lines.push(s.dueToday.length + (s.dueToday.length === 1 ? ' cobrança hoje: ' : ' cobranças hoje: ') + formatBRL(s.dueTotal));
+  if (billing && s.dueTomorrow && s.dueTomorrow.length) lines.push(s.dueTomorrow.length + (s.dueTomorrow.length === 1 ? ' cobrança amanhã: ' : ' cobranças amanhã: ') + formatBRL(s.tomorrowTotal));
   if (billing && s.late.length) {
     const who = s.lateClients.slice(0, 2).map(g => g.name.trim().split(/\s+/)[0] + ' ' + formatBRL(g.total)).join(', ');
     lines.push('⚠ Em atraso: ' + formatBRL(s.lateTotal) + ' (' + who + (s.lateClients.length > 2 ? '…' : '') + ')');
@@ -658,6 +661,22 @@ function App({ sb, session, onSignOut }) {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [data === null, data && data.tasks, data && data.receivables]);
 
+  // mantém o aparelho cadastrado para receber avisos: reconfirma ao abrir o app e ao voltar para ele (a cada 6 h no máximo)
+  useEffect(() => {
+    const run = () => {
+      try {
+        if (!session || !pushSupported() || Notification.permission !== 'granted') return;
+        const last = Number(localStorage.getItem('movia_push_sync') || 0);
+        if (Date.now() - last < 6 * 3600 * 1000) return;
+        syncPushSubscription().then(r => { if (r && r.ok) { try { localStorage.setItem('movia_push_sync', String(Date.now())); } catch (e) { /* ignora */ } } });
+      } catch (e) { /* ignora */ }
+    };
+    run();
+    const onVis = () => { if (document.visibilityState === 'visible') run(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [!!session]);
+
   if (data === null) {
     return (
       <div className="min-h-screen bg-black text-neutral-500 flex items-center justify-center fw-mono text-sm">
@@ -699,7 +718,7 @@ function App({ sb, session, onSignOut }) {
       const client = d.clients.find(c => c.id === sale.clientId);
       // venda "a receber": entra como venda, mas o dinheiro só entra no caixa quando cada parcela for marcada como recebida
       if (receive) {
-        const recs = buildInstallments({ saleId, clientId: sale.clientId, clientName: client ? client.name : sale.clientName, desc: 'Venda de ' + formatDM(sale.date), total, n: receive.n, firstDue: receive.firstDue });
+        const recs = buildInstallments({ saleId, clientId: sale.clientId, clientName: client ? client.name : sale.clientName, desc: 'Venda de ' + formatDM(sale.date), total, n: receive.n, firstDue: receive.dates[0], dates: receive.dates, method: sale.payMethod });
         const newSale = { ...saleBase, id: saleId, total, costTotal, profit: total - costTotal, financeId: null, onCredit: true };
         return { ...d, products, sales: [...d.sales, newSale], receivables: [...(d.receivables || []), ...recs] };
       }
@@ -707,7 +726,7 @@ function App({ sb, session, onSignOut }) {
       const newSale = { ...saleBase, id: saleId, total, costTotal, profit: total - costTotal, financeId };
       const financeEntry = {
         id: financeId, date: sale.date, type: 'entrada', category: 'venda',
-        desc: `Venda${client ? ' - ' + client.name : ''} (${sale.type})`, value: total, auto: true
+        desc: `Venda${client ? ' - ' + client.name : ''} (${sale.type})${sale.payMethod ? ' · ' + PAY_LABELS[sale.payMethod] : ''}`, value: total, auto: true
       };
       return { ...d, products, sales: [...d.sales, newSale], finance: [...d.finance, financeEntry] };
     });
@@ -743,15 +762,15 @@ function App({ sb, session, onSignOut }) {
     })
   }));
   // venda antiga lançada como recebida, mas que na verdade ainda está em aberto: tira do caixa e cria a cobrança
-  const convertSaleToReceivable = (saleId, { n, firstDue }) => setData(d => {
+  const convertSaleToReceivable = (saleId, { n, dates, method }) => setData(d => {
     const sale = d.sales.find(s => s.id === saleId);
     if (!sale || sale.onCredit) return d;
     const client = d.clients.find(c => c.id === sale.clientId);
-    const recs = buildInstallments({ saleId, clientId: sale.clientId || null, clientName: client ? client.name : (sale.clientName || 'Cliente'), desc: 'Venda de ' + formatDM(sale.date), total: sale.total, n, firstDue });
+    const recs = buildInstallments({ saleId, clientId: sale.clientId || null, clientName: client ? client.name : (sale.clientName || 'Cliente'), desc: 'Venda de ' + formatDM(sale.date), total: sale.total, n, firstDue: dates[0], dates, method });
     return {
       ...d,
       finance: d.finance.filter(f => f.id !== sale.financeId),
-      sales: d.sales.map(s => s.id === saleId ? { ...s, onCredit: true, financeId: null } : s),
+      sales: d.sales.map(s => s.id === saleId ? { ...s, onCredit: true, financeId: null, payMethod: method } : s),
       receivables: [...(d.receivables || []), ...recs],
     };
   });
@@ -1139,7 +1158,7 @@ function AgendaTab({ tasks, receivables, clients, storeName, onAddTask, onUpdate
       <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-neutral-900 last:border-b-0">
         <div className="flex-1 min-w-[180px]">
           <div className="text-sm text-neutral-100 font-medium">{r.clientName} <span className="fw-mono text-neutral-300">· {formatBRL(r.amount)}</span></div>
-          <div className={`text-[11px] ${st === 'late' ? 'text-red-400' : 'text-neutral-500'}`}>{r.desc} — {recWhen(r, today)}</div>
+          <div className={`text-[11px] ${st === 'late' ? 'text-red-400' : 'text-neutral-500'}`}>{r.desc}{r.method ? ' · ' + PAY_LABELS[r.method] : ''} — {recWhen(r, today)}</div>
         </div>
         <div className="flex gap-2 items-center">
           {st !== 'paid' && <button onClick={() => onMarkPaid(r.id, today)} className="fw-btn"><Check size={13} />Recebido</button>}
@@ -1653,8 +1672,8 @@ function LineCard({ title, note, data, lines, bucket, multi, selT, onPick }) {
       <div className="text-sm text-neutral-100 mb-2">{title}</div>
       <div className="flex flex-wrap gap-2 mb-2">
         {lines.map(l => (
-          <button key={l.key} onClick={() => setHidden(h => ({ ...h, [l.key]: !h[l.key] }))} className="flex items-center gap-1.5 text-[12px] px-2 py-1 border border-neutral-700" style={{ opacity: hidden[l.key] ? 0.4 : 1 }} aria-pressed={!hidden[l.key]}>
-            <span style={{ width: 10, height: 10, background: l.color, display: 'inline-block', borderRadius: 2 }} />{l.label}
+          <button key={l.key} onClick={() => setHidden(h => ({ ...h, [l.key]: !h[l.key] }))} className="flex items-center gap-2 text-[12px] px-2.5 py-1.5 border border-neutral-600 text-neutral-100 bg-neutral-900" style={{ opacity: hidden[l.key] ? 0.45 : 1 }} aria-pressed={!hidden[l.key]}>
+            <span style={{ width: 22, height: 4, background: l.color, display: 'inline-block', borderRadius: 2 }} />{l.label}
           </button>
         ))}
       </div>
@@ -2999,14 +3018,43 @@ function StockTab({ products, onSetStock, onUpdateProduct }) {
 }
 
 // ---------- Sales ----------
+function InstallmentsEditor({ total, n, dates, onChange }) {
+  const cents = Math.round((total || 0) * 100); const base = Math.floor(cents / n); const rem = cents - base * n;
+  const amt = (i) => (base + (i === n - 1 ? rem : 0)) / 100;
+  const setN = (nn) => { const first = dates[0] || addDaysISO(localISO(), 30); onChange({ n: nn, dates: Array.from({ length: nn }, (_, i) => dates[i] || addMonthsISO(first, i)) }); };
+  const setDate = (i, v) => { const d = [...dates]; d[i] = v; onChange({ n, dates: d }); };
+  const monthly = () => { if (!dates[0]) return; onChange({ n, dates: Array.from({ length: n }, (_, i) => addMonthsISO(dates[0], i)) }); };
+  return (
+    <div className="border border-neutral-800 p-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <Field label="Número de parcelas">
+          <select className="fw-input" value={n} onChange={e => setN(Number(e.target.value))}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 18, 24].map(k => <option key={k} value={k}>{k === 1 ? '1x (uma parcela)' : k + 'x'}</option>)}
+          </select>
+        </Field>
+        {n > 1 && <div className="flex items-end"><button type="button" className="fw-btn-ghost" onClick={monthly}>Repetir mês a mês a partir da 1ª data</button></div>}
+      </div>
+      <div className="text-[12px] text-neutral-400 mb-2">Vencimento de cada parcela (você pode ajustar uma a uma):</div>
+      <div className="space-y-2">
+        {Array.from({ length: n }, (_, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-3">
+            <span className="text-[13px] text-neutral-200 whitespace-nowrap sm:w-[210px] shrink-0">Parcela {i + 1}/{n} · <span className="fw-mono whitespace-nowrap">{formatBRL(amt(i))}</span></span>
+            <input type="date" className="fw-input" style={{ maxWidth: 190 }} value={dates[i] || ''} onChange={e => setDate(i, e.target.value)} aria-label={'Vencimento da parcela ' + (i + 1)} />
+          </div>
+        ))}
+      </div>
+      <div className="text-[12px] text-neutral-500 mt-3">Cada vencimento entra na Agenda e vira aviso no celular (resumo do dia e aviso na véspera). O valor só entra no caixa quando você marcar a parcela como recebida.</div>
+    </div>
+  );
+}
+
 function SalesTab({ products, clients, sales, onRegister, onDelete, onConvert, onOpenAgenda }) {
   const [convId, setConvId] = useState(null);
-  const [convN, setConvN] = useState(1);
-  const [convDue, setConvDue] = useState(localISO());
   const [clientId, setClientId] = useState('');
-  const [recvMode, setRecvMode] = useState('agora');
-  const [installments, setInstallments] = useState(1);
-  const [firstDue, setFirstDue] = useState(addDaysISO(localISO(), 30));
+  const [payMethod, setPayMethod] = useState('pix');
+  const [inst, setInst] = useState({ n: 1, dates: [addDaysISO(localISO(), 30)] });
+  const [convMethod, setConvMethod] = useState('crediario');
+  const [convInst, setConvInst] = useState({ n: 1, dates: [localISO()] });
   const [saleErr, setSaleErr] = useState('');
   const [type, setType] = useState('varejo');
   const [date, setDate] = useState(todayISO());
@@ -3030,11 +3078,12 @@ function SalesTab({ products, clients, sales, onRegister, onDelete, onConvert, o
   const submitSale = () => {
     if (cart.length === 0) return;
     const client = clients.find(c => c.id === clientId);
-    if (recvMode === 'receber' && !client) { setSaleErr('Para vender a receber, escolha a cliente (não vale "Consumidor final").'); return; }
-    if (recvMode === 'receber' && !firstDue) { setSaleErr('Informe o vencimento da primeira parcela.'); return; }
+    const parcelado = payMethod === 'credito' || payMethod === 'crediario';
+    if (payMethod === 'crediario' && !client) { setSaleErr('Para vender no crediário, escolha a cliente (não vale "Consumidor final").'); return; }
+    if (parcelado && (inst.dates.length !== inst.n || inst.dates.some(x => !x))) { setSaleErr('Informe o vencimento de todas as parcelas.'); return; }
     setSaleErr('');
-    onRegister({ date, clientId: clientId || null, clientName: client ? client.name : 'Consumidor final', type, items: cart, receive: recvMode === 'receber' ? { n: installments, firstDue } : null });
-    setCart([]); setRecvMode('agora'); setInstallments(1);
+    onRegister({ date, clientId: clientId || null, clientName: client ? client.name : 'Consumidor final', type, items: cart, payMethod, receive: parcelado ? { n: inst.n, dates: inst.dates } : null });
+    setCart([]); setPayMethod('pix'); setInst({ n: 1, dates: [addDaysISO(localISO(), 30)] });
   };
 
   return (
@@ -3054,22 +3103,14 @@ function SalesTab({ products, clients, sales, onRegister, onDelete, onConvert, o
                 <option value="varejo">Varejo</option><option value="atacado">Atacado</option>
               </select>
             </Field>
-            <Field label="Recebimento">
-              <select className="fw-input" value={recvMode} onChange={e => { setRecvMode(e.target.value); setSaleErr(''); }}>
-                <option value="agora">Recebido agora</option><option value="receber">A receber (fiado / parcelado)</option>
+            <Field label="Forma de pagamento">
+              <select className="fw-input" value={payMethod} onChange={e => { setPayMethod(e.target.value); setSaleErr(''); }}>
+                <option value="pix">Pix</option><option value="debito">Débito</option><option value="credito">Crédito (parcelado)</option><option value="crediario">Crediário (acerto com a gestora)</option>
               </select>
             </Field>
           </div>
-          {recvMode === 'receber' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              <Field label="Parcelas (mensais)">
-                <select className="fw-input" value={installments} onChange={e => setInstallments(Number(e.target.value))}>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n === 1 ? '1x (uma cobrança)' : n + 'x'}</option>)}
-                </select>
-              </Field>
-              <Field label="1º vencimento"><input type="date" className="fw-input" value={firstDue} onChange={e => setFirstDue(e.target.value)} /></Field>
-              <div className="sm:col-span-2 text-[12px] text-neutral-500 flex items-end pb-2">O valor entra no caixa só quando você marcar cada parcela como recebida na Agenda.</div>
-            </div>
+          {(payMethod === 'credito' || payMethod === 'crediario') && (
+            <InstallmentsEditor total={total} n={inst.n} dates={inst.dates} onChange={setInst} />
           )}
           {saleErr && <div className="text-[12px] text-red-400 mb-3">{saleErr}</div>}
 
@@ -3129,16 +3170,16 @@ function SalesTab({ products, clients, sales, onRegister, onDelete, onConvert, o
             <div className="bg-neutral-950 border border-neutral-700 p-4 mb-3">
               <div className="text-sm text-neutral-100 font-medium mb-1">Marcar como a receber — {cs.clientName || 'Cliente'} · {formatBRL(cs.total)} ({formatDMY(cs.date)})</div>
               <div className="text-[12px] text-neutral-500 mb-3">Esta venda estava lançada como recebida. Ao confirmar, o valor sai do caixa e vira cobrança na Agenda; só volta ao caixa quando você marcar como recebido. Se o vencimento já passou, a cliente aparece como inadimplente.</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
-                <Field label="Vencimento (1ª parcela)"><input type="date" className="fw-input" value={convDue} onChange={e => setConvDue(e.target.value)} /></Field>
-                <Field label="Parcelas (mensais)">
-                  <select className="fw-input" value={convN} onChange={e => setConvN(Number(e.target.value))}>
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n === 1 ? '1x (uma cobrança)' : n + 'x'}</option>)}
+              <div className="max-w-md mb-3">
+                <Field label="Forma de pagamento">
+                  <select className="fw-input" value={convMethod} onChange={e => setConvMethod(e.target.value)}>
+                    <option value="crediario">Crediário (acerto com a gestora)</option><option value="credito">Crédito (parcelado)</option>
                   </select>
                 </Field>
               </div>
+              <InstallmentsEditor total={cs.total} n={convInst.n} dates={convInst.dates} onChange={setConvInst} />
               <div className="flex gap-2 mt-3">
-                <button className="fw-btn" onClick={() => { if (!convDue) return; onConvert(convId, { n: convN, firstDue: convDue }); setConvId(null); setConvN(1); if (onOpenAgenda) onOpenAgenda(); }}><Check size={14} />Confirmar</button>
+                <button className="fw-btn" onClick={() => { if (convInst.dates.length !== convInst.n || convInst.dates.some(x => !x)) return; onConvert(convId, { n: convInst.n, dates: convInst.dates, method: convMethod }); setConvId(null); setConvInst({ n: 1, dates: [localISO()] }); if (onOpenAgenda) onOpenAgenda(); }}><Check size={14} />Confirmar</button>
                 <button className="fw-btn-ghost" onClick={() => setConvId(null)}>Cancelar</button>
               </div>
             </div>
@@ -3151,11 +3192,11 @@ function SalesTab({ products, clients, sales, onRegister, onDelete, onConvert, o
               {sales.length === 0 && <tr><td colSpan={6} className="text-neutral-600 text-center py-6">Nenhuma venda registrada.</td></tr>}
               {[...sales].reverse().map(s => (
                 <tr key={s.id}>
-                  <td>{s.date}</td><td>{s.clientName}{s.onCredit && <span className="ml-2 text-[10px] border border-neutral-600 text-neutral-400 px-1.5 py-0.5 rounded">a receber</span>}</td><td className="capitalize">{s.type}</td>
+                  <td>{s.date}</td><td>{s.clientName}{s.payMethod && <span className="ml-2 text-[10px] border border-neutral-700 text-neutral-300 px-1.5 py-0.5 rounded">{PAY_LABELS[s.payMethod]}</span>}{s.onCredit && <span className="ml-2 text-[10px] border border-neutral-600 text-neutral-400 px-1.5 py-0.5 rounded">a receber</span>}</td><td className="capitalize">{s.type}</td>
                   <td>{formatBRL(s.total)}</td>
                   <td className={s.profit >= 0 ? 'text-white' : 'text-white'}>{formatBRL(s.profit)}</td>
                   <td className="whitespace-nowrap">
-                    {!s.onCredit && <button onClick={() => { setConvId(s.id); setConvDue(localISO()); window.scrollTo(0, document.body.scrollHeight); }} className="fw-btn-ghost mr-1" title="Esta venda ainda não foi paga">Em aberto?</button>}
+                    {!s.onCredit && <button onClick={() => { setConvId(s.id); setConvInst({ n: 1, dates: [localISO()] }); window.scrollTo(0, document.body.scrollHeight); }} className="fw-btn-ghost mr-1" title="Esta venda ainda não foi paga">Em aberto?</button>}
                     <button onClick={() => onDelete(s.id)} className="fw-btn-ghost" aria-label="Excluir venda"><Trash2 size={13} /></button>
                   </td>
                 </tr>

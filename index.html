@@ -86,13 +86,20 @@ function touchSession() {
 function isBot() {
   try { return !!navigator.webdriver || /bot|crawl|spider|headless|lighthouse|pagespeed/i.test(navigator.userAgent || ''); } catch (e) { return false; }
 }
+// chamada que sobrevive à troca de aplicativo (ex.: abrir o WhatsApp logo em seguida)
+function rpcKeep(name, args) {
+  try {
+    return fetch(SUPABASE_URL + '/rest/v1/rpc/' + name, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY }, body: JSON.stringify(args) }).then(() => {}, () => {});
+  } catch (e) { return sb.rpc(name, args).then(() => {}, () => {}); }
+}
 function trackOff() { try { return localStorage.getItem('movia_no_track') === '1'; } catch (e) { return false; } }
 function track(type, f) {
   if (trackOff() || isBot()) return;
   touchSession();
   try {
     f = f || {};
-    sb.rpc('track_event', { p_vid: VID, p_type: type, p_product_id: f.pid || null, p_product_name: f.name || null, p_tab: f.tab || null, p_value: f.value != null ? f.value : null, p_meta: f.meta || {} }).then(() => {}, () => {});
+    const args = { p_vid: VID, p_type: type, p_product_id: f.pid || null, p_product_name: f.name || null, p_tab: f.tab || null, p_value: f.value != null ? f.value : null, p_meta: f.meta || {} };
+    if (type === 'order_sent') rpcKeep('track_event', args); else sb.rpc('track_event', args).then(() => {}, () => {});
   } catch (e) { /* ignora */ }
 }
 function refSource() {
@@ -758,14 +765,14 @@ function App() {
       const phone = catalog.whatsapp_number.replace(/\D/g, '');
       // Avisa a loja (notificação no celular). Não espera resposta para não atrasar a abertura do WhatsApp.
       try {
-        sb.rpc('notify_new_order', {
+        rpcKeep('notify_new_order', {
           p_customer: clientName.trim(),
           p_items: cart.reduce((n, i) => n + i.qty, 0),
           p_total: total,
           p_summary: buildMessage(),
           p_birth_date: birthValid ? birthDate : null,
           p_birth_consent: birthValid
-        }).then(() => {}, () => {});
+        });
       } catch (e) { /* ignora */ }
       window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
     } catch (e) {
