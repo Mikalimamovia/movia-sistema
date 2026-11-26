@@ -1160,10 +1160,7 @@ function ReceivableForm({ clients, onSave, onCancel }) {
     <form onSubmit={submit} className="bg-neutral-950 border border-neutral-800 p-4 mb-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
         <Field label="Cliente">
-          <select className="fw-input" value={f.clientId} onChange={e => set('clientId', e.target.value)}>
-            <option value="">Outra (digitar nome)</option>
-            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <ClientPicker clients={clients} value={f.clientId} onChange={v => set('clientId', v)} emptyLabel="Outra (digitar nome)" />
         </Field>
         {!f.clientId ? <Field label="Nome"><input className="fw-input" value={f.name} onChange={e => set('name', e.target.value)} /></Field> : <div className="hidden md:block" />}
         <Field label="Descrição"><input className="fw-input" value={f.desc} onChange={e => set('desc', e.target.value)} placeholder="Ex.: Peças do dia 10/11" /></Field>
@@ -3223,6 +3220,62 @@ function StockTab({ products, onSetStock, onUpdateProduct }) {
 }
 
 // ---------- Sales ----------
+// escolha de cliente: digite para buscar (nome ou telefone) ou abra a lista completa
+function ClientPicker({ clients, value, onChange, emptyLabel = 'Consumidor final' }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const box = useRef(null);
+  const sel = clients.find(c => c.id === value) || null;
+  const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const digits = (t) => String(t || '').replace(/\D/g, '');
+  const term = norm(q).trim(); const dq = digits(q);
+  const list = clients.filter(c => !term || norm(c.name).includes(term) || (dq.length >= 3 && digits(c.phone).includes(dq)))
+    .sort((a, b) => { const sa = norm(a.name).startsWith(term) ? 0 : 1, sb2 = norm(b.name).startsWith(term) ? 0 : 1; return sa - sb2 || norm(a.name).localeCompare(norm(b.name)); });
+  const shown = list.slice(0, 40);
+  const items = [{ id: '', name: emptyLabel, empty: true }, ...shown];
+  useEffect(() => {
+    if (!open) return;
+    const f = (e) => { if (box.current && !box.current.contains(e.target)) { setOpen(false); setQ(''); } };
+    document.addEventListener('mousedown', f); document.addEventListener('touchstart', f);
+    return () => { document.removeEventListener('mousedown', f); document.removeEventListener('touchstart', f); };
+  }, [open]);
+  const pick = (id) => { onChange(id); setOpen(false); setQ(''); };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHi(h => Math.min(items.length - 1, h + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(0, h - 1)); }
+    else if (e.key === 'Enter') { if (open) { e.preventDefault(); const it = items[hi] || items[1] || items[0]; pick(it.id); } }
+    else if (e.key === 'Escape') { setOpen(false); setQ(''); }
+  };
+  return (
+    <div ref={box} className="relative">
+      <div className="flex">
+        <input className="fw-input flex-1 min-w-0" role="combobox" aria-expanded={open} aria-label="Cliente" autoComplete="off"
+          placeholder={sel ? sel.name : emptyLabel + ' — digite para buscar'}
+          value={open ? q : (sel ? sel.name : '')}
+          onFocus={() => { setOpen(true); setHi(0); }}
+          onChange={e => { setQ(e.target.value); setOpen(true); setHi(1); }}
+          onKeyDown={onKey} />
+        {sel && <button type="button" className="fw-btn-ghost" aria-label="Limpar cliente" onClick={() => pick('')}><X size={12} /></button>}
+        <button type="button" className="fw-btn-ghost" aria-label="Abrir lista de clientes" onClick={() => { setOpen(o => !o); setQ(''); setHi(0); }}>▾</button>
+      </div>
+      {open && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-neutral-950 border border-neutral-600 max-h-72 overflow-y-auto shadow-lg" role="listbox">
+          {items.map((c, i) => (
+            <button type="button" key={c.id || 'empty'} role="option" aria-selected={c.id === value}
+              onMouseDown={e => e.preventDefault()} onClick={() => pick(c.id)} onMouseEnter={() => setHi(i)}
+              className={'w-full text-left px-3 py-2 text-[14px] flex items-center justify-between gap-3 ' + (i === hi ? 'bg-neutral-800 text-white' : 'text-neutral-200') + (c.empty ? ' border-b border-neutral-800 italic' : '')}>
+              <span className="truncate">{c.name}</span>
+              {!c.empty && <span className="text-[11px] text-neutral-500 shrink-0">{c.phone || ''}</span>}
+            </button>
+          ))}
+          {shown.length === 0 && <div className="px-3 py-2 text-[13px] text-neutral-500">Nenhum cliente encontrado para "{q}".</div>}
+          {list.length > shown.length && <div className="px-3 py-2 text-[12px] text-neutral-500 border-t border-neutral-800">Mostrando {shown.length} de {list.length}. Digite mais letras para filtrar.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
 function InstallmentsEditor({ total, n, dates, onChange }) {
   const cents = Math.round((total || 0) * 100); const base = Math.floor(cents / n); const rem = cents - base * n;
   const amt = (i) => (base + (i === n - 1 ? rem : 0)) / 100;
@@ -3298,10 +3351,7 @@ function SalesTab({ products, clients, sales, onRegister, onDelete, onConvert, o
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Field label="Data"><input type="date" className="fw-input" value={date} onChange={e => setDate(e.target.value)} /></Field>
             <Field label="Cliente">
-              <select className="fw-input" value={clientId} onChange={e => setClientId(e.target.value)}>
-                <option value="">Consumidor final</option>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ClientPicker clients={clients} value={clientId} onChange={setClientId} />
             </Field>
             <Field label="Tipo de venda">
               <select className="fw-input" value={type} onChange={e => setType(e.target.value)}>
@@ -3836,10 +3886,7 @@ function OrdersTab({ products, clients, orders, onAdd, onUpdateStatus, onDelete 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
             <Field label="Data"><input type="date" className="fw-input" value={date} onChange={e => setDate(e.target.value)} /></Field>
             <Field label="Cliente">
-              <select className="fw-input" value={clientId} onChange={e => setClientId(e.target.value)}>
-                <option value="">Consumidor final</option>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ClientPicker clients={clients} value={clientId} onChange={setClientId} />
             </Field>
             <Field label="Observações"><input className="fw-input" value={notes} onChange={e => setNotes(e.target.value)} /></Field>
           </div>
