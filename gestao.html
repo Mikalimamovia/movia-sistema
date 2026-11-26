@@ -1766,6 +1766,59 @@ function BucketDetail({ det, loading, tabName, onClose, onDrill }) {
   );
 }
 
+// Monitor "eletrocardiograma": acompanha quantas pessoas estão online enquanto o painel está aberto
+function LiveMonitor({ value, onClick }) {
+  const W = 3 * 60 * 1000;
+  const vRef = useRef(value); vRef.current = value;
+  const hist = useRef([]);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const push = (v) => { const t = Date.now(); const h = hist.current; h.push({ t, n: v }); while (h.length > 2 && h[1].t < t - W - 15000) h.shift(); };
+    let last = null;
+    const id = setInterval(() => {
+      const v = vRef.current; const t = Date.now();
+      if (v == null) { setNow(t); return; }
+      const h = hist.current;
+      if (last === null || v !== last || !h.length || t - h[h.length - 1].t >= 5000) { push(v); last = v; }
+      setNow(t);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const h = hist.current; const t1 = now, t0 = now - W;
+  const VW = 320, VH = 70, PAD = 8;
+  const vis = h.filter(p => p.t >= t0 - 20000);
+  const maxN = Math.max(3, ...vis.map(p => p.n));
+  const X = (t) => Math.max(0, Math.min(VW, ((t - t0) / W) * VW));
+  const Y = (n) => VH - PAD - (n / maxN) * (VH - PAD * 2);
+  let d = ''; let endY = Y(0);
+  if (vis.length) {
+    d = 'M' + X(vis[0].t).toFixed(1) + ' ' + Y(vis[0].n).toFixed(1);
+    for (let i = 1; i < vis.length; i++) d += ' H' + X(vis[i].t).toFixed(1) + ' V' + Y(vis[i].n).toFixed(1);
+    endY = Y(vis[vis.length - 1].n); d += ' H' + VW;
+  }
+  const n = value == null ? '—' : value;
+  return (
+    <button type="button" onClick={onClick} className="col-span-2 md:col-span-2 text-left bg-neutral-950 border border-green-700 p-3 w-full" aria-label="Online agora: monitor ao vivo. Toque para ver detalhes">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-green-400">Online agora</div>
+          <div className="fw-mono text-3xl text-neutral-100 mt-1 leading-none">{n}</div>
+        </div>
+        <div className="text-[11px] text-neutral-400 text-right leading-snug">pessoas no catálogo<br />nos últimos 5 min<br /><span className="text-green-400">toque para detalhar</span></div>
+      </div>
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full mt-2" style={{ height: 70 }} role="img" aria-label={'Monitor de pessoas online, agora ' + n}>
+        {[0.25, 0.5, 0.75].map(f => <line key={f} x1="0" x2={VW} y1={VH * f} y2={VH * f} stroke="#14532d" strokeWidth="0.5" strokeDasharray="2 4" />)}
+        {[1, 2, 3].map(k => <line key={k} y1="0" y2={VH} x1={(VW / 4) * k} x2={(VW / 4) * k} stroke="#14532d" strokeWidth="0.5" strokeDasharray="2 4" />)}
+        <line x1="0" x2={VW} y1={Y(0)} y2={Y(0)} stroke="#166534" strokeWidth="0.8" />
+        {d && <path d={d} fill="none" stroke="#4ade80" strokeWidth="2" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 3px #4ade80)' }} />}
+        {d && <circle cx={VW - 2} cy={endY} r="3.5" fill="#bbf7d0"><animate attributeName="r" values="3;6;3" dur="1.2s" repeatCount="indefinite" /><animate attributeName="opacity" values="1;0.4;1" dur="1.2s" repeatCount="indefinite" /></circle>}
+        <text x="3" y="9" fontSize="8" fill="#86efac">{maxN}</text>
+        <text x="3" y={Y(0) - 3} fontSize="8" fill="#86efac">0</text>
+      </svg>
+      <div className="flex justify-between text-[10px] text-neutral-500 mt-1"><span>3 min atrás</span><span>agora</span></div>
+    </button>
+  );
+}
 function ActivityTab({ tabs, compact, onOpenActivity }) {
   const [range, setRange] = useState('today');
   const [sum, setSum] = useState(null);
@@ -1861,12 +1914,8 @@ function ActivityTab({ tabs, compact, onOpenActivity }) {
   return (
     <div>
       <Section title={compact ? "Atividade do catálogo ao vivo" : "Atividade do site"} action={<span className="text-[11px] text-neutral-500 flex items-center gap-1.5"><span className={`inline-block w-2 h-2 rounded-full ${rt ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />{rt ? 'tempo real' : 'atualiza a cada 15 s'}</span>}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-          <div className="bg-neutral-950 border border-green-700 p-3">
-            <div className="text-[11px] uppercase tracking-wider text-green-400">Online agora</div>
-            <div className="fw-mono text-3xl text-neutral-100 mt-1">{live ? live.online : '—'}</div>
-            <div className="text-[11px] text-neutral-500">últimos 5 min</div>
-          </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          <LiveMonitor value={live ? live.online : null} onClick={() => { if (compact && onOpenActivity) onOpenActivity(); else { const el = document.getElementById('atividade-detalhe-ao-vivo'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }} />
           <div className="bg-neutral-950 border border-green-700 p-3">
             <div className="text-[11px] uppercase tracking-wider text-green-400">Sacolas ativas</div>
             <div className="fw-mono text-3xl text-neutral-100 mt-1">{live ? carts.length : '—'}</div>
@@ -1953,6 +2002,7 @@ function ActivityTab({ tabs, compact, onOpenActivity }) {
         <div className="text-[11px] text-neutral-500 mt-2">"Cliques" = abriu a foto ou os detalhes da peça. "Vendidas" = unidades em pedidos enviados pelo catálogo.</div>
       </Section>
 
+      <div id="atividade-detalhe-ao-vivo" style={{ scrollMarginTop: 70 }} />
       <Section title="Sacolas abertas agora">
         <div className="space-y-2">
           {carts.length === 0 && <div className="text-neutral-600 text-sm bg-neutral-950 border border-neutral-800 p-4 text-center">Nenhuma sacola aberta nos últimos 30 minutos.</div>}
