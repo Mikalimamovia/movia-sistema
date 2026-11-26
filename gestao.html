@@ -445,7 +445,7 @@ function tabSlug(name) { return String(name || '').normalize('NFD').replace(/[̀
 function fmtTabDate(s) { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s || ''); return m ? m[3] + '/' + m[2] + ' às ' + m[4] + ':' + m[5] : ''; }
 
 function emptyData() {
-  return { products: [], clients: [], sales: [], purchases: [], finance: [], orders: [], pricingCosts: [], pricingMargin: 100, catalogSettings: { whatsappNumber: '', storeName: 'movia.' }, tasks: [], receivables: [], catalogTabs: [] };
+  return { products: [], clients: [], sales: [], purchases: [], finance: [], orders: [], pricingCosts: [], pricingMargin: 100, catalogSettings: { whatsappNumber: '', storeName: 'movia.' }, tasks: [], receivables: [], catalogTabs: [], catalogOrder: [] };
 }
 
 const NAV = [
@@ -843,11 +843,14 @@ function App({ sb, session, onSignOut }) {
     if (i < 0 || j < 0 || j >= a.length) return d;
     [a[i], a[j]] = [a[j], a[i]]; return { ...d, catalogTabs: a };
   });
+  const setCatalogOrder = (ids) => setData(d => ({ ...d, catalogOrder: ids }));
   const updateCatalogSettings = (patch) => setData(d => ({ ...d, catalogSettings: { ...d.catalogSettings, ...patch } }));
   const publishCatalog = async () => {
     setPublishState('publishing');
     try {
-      const snapshot = data.products.map(p => ({
+      const ord = new Map((data.catalogOrder || []).map((id, i) => [id, i]));
+      const ordered = data.products.map((p, i) => ({ p, k: ord.has(p.id) ? ord.get(p.id) : 100000 + i })).sort((a, b) => a.k - b.k).map(x => x.p);
+      const snapshot = ordered.map(p => ({
         id: p.id, name: p.name, category: p.category,
         photos: p.photos || [], price: p.retail || 0,
         description: p.description || '', notes: p.notes || '',
@@ -994,6 +997,7 @@ function App({ sb, session, onSignOut }) {
           <CatalogTab
             products={data.products}
             settings={data.catalogSettings}
+            order={data.catalogOrder || []} onOrder={setCatalogOrder}
             tabs={data.catalogTabs} onAddTab={addTab} onUpdateTab={updateTab} onDeleteTab={deleteTab} onMoveTab={moveTab}
             onSaveSettings={updateCatalogSettings}
             onPublish={publishCatalog}
@@ -2212,10 +2216,21 @@ function MultiPhotoUploader({ sb, photos, onChange }) {
     if (url) next[i] = url; else next.splice(i, 1);
     onChange(next.filter(Boolean));
   };
+  const move = (i, to) => { if (to < 0 || to >= arr.length) return; const next = [...arr]; const [x] = next.splice(i, 1); next.splice(to, 0, x); onChange(next); };
   return (
     <div className="flex flex-col gap-2">
+      {arr.length > 1 && <div className="text-[11px] text-neutral-400">A primeira foto é a capa. Use as setas para ordenar as fotos como quiser.</div>}
       {arr.map((url, i) => (
         <div key={i} className="flex items-center gap-2">
+          {arr.length > 1 && (
+            <div className="flex flex-col gap-1 shrink-0 items-center">
+              <span className={'text-[9px] px-1 ' + (i === 0 ? 'bg-white text-black font-bold' : 'text-neutral-500')}>{i === 0 ? 'CAPA' : i + 1}</span>
+              <div className="flex gap-1">
+                <button type="button" className="fw-btn-ghost" aria-label={'Subir foto ' + (i + 1)} disabled={i === 0} onClick={() => move(i, i - 1)}>↑</button>
+                <button type="button" className="fw-btn-ghost" aria-label={'Descer foto ' + (i + 1)} disabled={i === arr.length - 1} onClick={() => move(i, i + 1)}>↓</button>
+              </div>
+            </div>
+          )}
           <div className="flex-1"><PhotoUploader sb={sb} value={url} onChange={u => setAt(i, u)} /></div>
           <button type="button" onClick={() => setAt(i, '')} className="fw-btn-ghost"><X size={12} /></button>
         </div>
@@ -2620,7 +2635,48 @@ function TabsManager({ products, tabs, catalogUrl, onAdd, onUpdate, onDelete, on
   );
 }
 
-function CatalogTab({ products, settings, tabs, onAddTab, onUpdateTab, onDeleteTab, onMoveTab, onSaveSettings, onPublish, publishState }) {
+function CatalogOrderManager({ products, order, tabs, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const byId = new Map(products.map(p => [p.id, p]));
+  const ids = [...order.filter(id => byId.has(id)), ...products.map(p => p.id).filter(id => !order.includes(id))];
+  const inTab = (id) => (tabs || []).filter(t => t.active !== false && (t.productIds || []).includes(id)).map(t => t.name);
+  const commit = (arr) => onChange(arr);
+  const move = (id, to) => { const a = ids.filter(x => x !== id); a.splice(Math.max(0, Math.min(a.length, to)), 0, id); commit(a); };
+  const shown = ids.filter(id => !q.trim() || (byId.get(id).name || '').toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <Section title="Ordem dos produtos no catálogo">
+      <div className="bg-neutral-950 border border-neutral-800 p-4 mb-4">
+        <div className="text-[13px] text-neutral-300 mb-3">Escolha a posição de cada peça na vitrine. Peças que estão numa aba promocional ou separada aparecem sempre <b>no fim</b> da vitrine principal, enquanto a aba estiver no ar; dentro da própria aba vale a ordem da aba. Depois de mexer, clique em <b>Publicar</b>.</div>
+        <button type="button" className="fw-btn-ghost" onClick={() => setOpen(o => !o)}>{open ? 'Fechar a lista' : 'Organizar produtos (' + ids.length + ')'}</button>
+        {open && (
+          <div className="mt-3">
+            <input className="fw-input mb-2" placeholder="Buscar produto..." value={q} onChange={e => setQ(e.target.value)} />
+            <div className="space-y-1.5">
+              {shown.map((id) => { const p = byId.get(id); const pos = ids.indexOf(id); const tabsOf = inTab(id); return (
+                <div key={id} className="flex items-center gap-2 border border-neutral-800 p-2">
+                  <span className="fw-mono text-[11px] text-neutral-500 w-6 text-right shrink-0">{pos + 1}</span>
+                  {p.photos && p.photos[0] ? <img src={p.photos[0]} alt="" className="w-9 h-9 object-cover shrink-0" /> : <div className="w-9 h-9 bg-neutral-900 shrink-0" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] text-neutral-100 truncate">{p.name}</div>
+                    {tabsOf.length > 0 && <div className="text-[10px] text-neutral-400 truncate">na aba: {tabsOf.join(', ')} → vai para o fim</div>}
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <button type="button" className="fw-btn-ghost" title="Para o início" aria-label={'Mover ' + p.name + ' para o início'} disabled={pos === 0} onClick={() => move(id, 0)}>⤒</button>
+                    <button type="button" className="fw-btn-ghost" title="Subir" aria-label={'Subir ' + p.name} disabled={pos === 0} onClick={() => move(id, pos - 1)}>↑</button>
+                    <button type="button" className="fw-btn-ghost" title="Descer" aria-label={'Descer ' + p.name} disabled={pos === ids.length - 1} onClick={() => move(id, pos + 1)}>↓</button>
+                    <button type="button" className="fw-btn-ghost" title="Para o fim" aria-label={'Mover ' + p.name + ' para o fim'} disabled={pos === ids.length - 1} onClick={() => move(id, ids.length)}>⤓</button>
+                  </div>
+                </div>
+              ); })}
+            </div>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+function CatalogTab({ products, settings, order, onOrder, tabs, onAddTab, onUpdateTab, onDeleteTab, onMoveTab, onSaveSettings, onPublish, publishState }) {
   const [waNumber, setWaNumber] = useState((settings && settings.whatsappNumber) || '');
   const [storeName, setStoreName] = useState((settings && settings.storeName) || 'movia.');
   const [copied, setCopied] = useState(false);
@@ -2656,6 +2712,8 @@ function CatalogTab({ products, settings, tabs, onAddTab, onUpdateTab, onDeleteT
       </Section>
 
       <TabsManager products={products} tabs={tabs || []} catalogUrl={catalogUrl} onAdd={onAddTab} onUpdate={onUpdateTab} onDelete={onDeleteTab} onMove={onMoveTab} onPublish={onPublish} publishState={publishState} />
+
+      <CatalogOrderManager products={products} order={order || []} tabs={tabs || []} onChange={onOrder} />
 
       <Section title="Publicar catálogo">
         <div className="bg-neutral-950 border border-neutral-800 p-4">
