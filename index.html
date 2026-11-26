@@ -21,7 +21,15 @@
   .tab-btn.selected { background: var(--fg); color: var(--bg); border-color: var(--fg); }
   .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
   .tab-btn.selected .tab-dot { background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
-  .promo-badge { position: absolute; top: 10px; left: 10px; background: var(--accent); color: #fff; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 12px; letter-spacing: .04em; padding: 5px 9px; }
+  .tab-btn.promo { background: var(--accent); color: #fff; border-color: var(--accent); font-size: 15px; font-weight: 800; padding: 13px 24px; letter-spacing: .02em; text-transform: uppercase; }
+  .tab-btn.promo.selected { background: var(--accent); color: #fff; box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
+  .tab-btn.promo .tab-dot, .tab-btn.promo.selected .tab-dot { background: #fff; box-shadow: none; }
+  @media (prefers-reduced-motion: no-preference) { .tab-btn.promo:not(.selected) { animation: promoPulse 1.8s ease-in-out infinite; } }
+  @keyframes promoPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 60, 50, 0.55); } 50% { box-shadow: 0 0 0 9px rgba(255, 60, 50, 0); } }
+  .promo-tag { position: absolute; top: 0; left: 0; background: #000; color: #fff; border: 1px solid rgba(255,255,255,.55); border-top: 0; border-left: 0; font-family: 'Inter', sans-serif; font-weight: 800; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; padding: 7px 12px; z-index: 2; }
+  .promo-hero { border-left: 5px solid var(--accent); padding: 4px 0 4px 14px; margin-top: 18px; }
+  .promo-valid { display: inline-block; background: var(--accent); color: #fff; font-family: 'Inter', sans-serif; font-weight: 800; font-size: 13px; letter-spacing: .03em; padding: 8px 14px; margin-top: 14px; }
+  .promo-badge { position: absolute; top: 10px; right: 10px; background: var(--accent); color: #fff; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 12px; letter-spacing: .04em; padding: 5px 9px; }
   #root:empty::before {
     content: 'Carregando catálogo...';
     color: #666; font-family: monospace; font-size: 12px; display: block; padding: 24px;
@@ -354,6 +362,7 @@ function LookCard({ product, promo, onAddToCart, onOpenLightbox, activeSourceKey
             <span className="eyebrow">sem foto</span>
           </div>
         )}
+        {promo && <span className="promo-tag">Promoção</span>}
         {promo && !allOutOfStock && <span className="promo-badge">-{Math.round((1 - promo.price / product.price) * 100)}%</span>}
         {allOutOfStock && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -445,6 +454,12 @@ function LookCard({ product, promo, onAddToCart, onOpenLightbox, activeSourceKey
             />
           </div>
         </div>
+
+        {promo && (
+          <div className="f-body text-[11px] mt-2 leading-snug" style={{ color: 'var(--muted)' }}>
+            Valor promocional válido {promo.end ? 'até ' + fmtTabDate(promo.end) + ' ou ' : ''}enquanto durarem os estoques.
+          </div>
+        )}
 
         <button onClick={add} disabled={!canAdd} className="btn-primary w-full mt-3">
           {allOutOfStock ? 'Esgotado' : !selectedColor ? 'Escolha a cor' : !selectedSize ? 'Escolha o tamanho' : 'Adicionar à sacola'}
@@ -699,7 +714,7 @@ function App() {
   liveTabs.filter(t => t.kind === 'promo').forEach(t => {
     Object.keys(t.prices || {}).forEach(pid => {
       const p = byId[pid]; const pr = Number(t.prices[pid]);
-      if (p && pr > 0 && pr < Number(p.price) && (!promoMap[pid] || pr < promoMap[pid].price)) promoMap[pid] = { price: pr, tab: t.name };
+      if (p && pr > 0 && pr < Number(p.price) && (!promoMap[pid] || pr < promoMap[pid].price)) promoMap[pid] = { price: pr, tab: t.name, end: t.end || '' };
     });
   });
   const baseProducts = activeTab ? activeTab.productIds.map(id => byId[id]).filter(Boolean) : catalog.products;
@@ -726,13 +741,19 @@ function App() {
         <h1 className="f-display font-extrabold leading-[1.15]" style={{ fontSize: 'clamp(28px, 5vw, 42px)', color: 'var(--fg)' }}>
           Peças pensadas para o seu<br /><span style={{ color: 'var(--muted)' }}>movimento.</span>
         </h1>
-        <p className="f-body text-[14px] t-muted mt-4 max-w-md leading-relaxed">
-          {activeTab
-            ? (activeTab.subtitle || (activeTab.kind === 'promo' ? 'Ofertas por tempo limitado — garanta já as suas peças.' : 'Uma seleção especial de peças para você.'))
-            : 'Navegue pela coleção completa da loja — fotos, tamanhos e cores de cada peça, tudo em um só lugar.'}
-        </p>
-        {activeTab && activeTab.kind === 'promo' && activeTab.end && (
-          <div className="f-body text-[12px] font-semibold mt-3" style={{ color: 'var(--accent)' }}>Ofertas válidas até {fmtTabDate(activeTab.end)}</div>
+        {activeTab && activeTab.kind === 'promo' ? (
+          <>
+            <div className="promo-hero">
+              <p className="f-display font-extrabold leading-tight" style={{ fontSize: 'clamp(19px, 4.6vw, 26px)', color: 'var(--fg)' }}>
+                {activeTab.subtitle || 'Ofertas por tempo limitado — garanta já as suas peças!'}
+              </p>
+            </div>
+            {activeTab.end && <div className="promo-valid">⏰ Ofertas válidas até {fmtTabDate(activeTab.end)}</div>}
+          </>
+        ) : (
+          <p className="f-body text-[14px] t-muted mt-4 max-w-md leading-relaxed">
+            {activeTab ? (activeTab.subtitle || 'Uma seleção especial de peças para você.') : 'Navegue pela coleção completa da loja — fotos, tamanhos e cores de cada peça, tudo em um só lugar.'}
+          </p>
         )}
 
         <div
@@ -754,8 +775,8 @@ function App() {
           <div className="tabs-row flex gap-2 overflow-x-auto -mx-6 px-6 mt-7" role="tablist" aria-label="Abas do catálogo">
             <button role="tab" aria-selected={!activeTab} onClick={() => selectTab(null)} className={`tab-btn ${!activeTab ? 'selected' : ''}`}>Todas as peças</button>
             {liveTabs.map(t => (
-              <button key={t.id} role="tab" aria-selected={activeTab && activeTab.id === t.id} onClick={() => selectTab(t.id)} className={`tab-btn ${activeTab && activeTab.id === t.id ? 'selected' : ''}`}>
-                {t.kind === 'promo' && <span className="tab-dot"></span>}{t.name}
+              <button key={t.id} role="tab" aria-selected={activeTab && activeTab.id === t.id} onClick={() => selectTab(t.id)} className={`tab-btn ${t.kind === 'promo' ? 'promo' : ''} ${activeTab && activeTab.id === t.id ? 'selected' : ''}`}>
+                {t.kind === 'promo' ? <span aria-hidden="true">🔥</span> : null}{t.name}
               </button>
             ))}
           </div>
