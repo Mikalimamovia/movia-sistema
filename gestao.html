@@ -1663,8 +1663,8 @@ function tLong(t, bucket) {
   return bucket === 'hour' ? d + ' · ' + String(t).slice(11, 13) + ':00 às ' + String(t).slice(11, 13) + ':59' : d + ' (dia todo)';
 }
 function tRange(t, bucket) { const f = new Date(String(t) + ':00-03:00'); return { from: f, to: new Date(f.getTime() + (bucket === 'hour' ? 3600000 : 86400000)) }; }
-const CHART_A = [{ key: 'visits', label: 'Visitas', color: '#e5e5e5' }, { key: 'uniques', label: 'Visitantes únicos', color: '#60a5fa' }];
-const CHART_B = [{ key: 'product_views', label: 'Cliques em peças', color: '#facc15' }, { key: 'adds', label: 'Na sacola', color: '#fb923c' }, { key: 'orders', label: 'Pedidos', color: '#4ade80' }, { key: 'whatsapp', label: 'WhatsApp', color: '#a78bfa' }];
+const CHART_A = [{ key: 'visits', label: 'Visitas', color: '#e5e5e5', desc: 'cada vez que alguém entra no site. Atualizar a página não conta de novo.' }, { key: 'uniques', label: 'Visitantes únicos', color: '#60a5fa', desc: 'pessoas diferentes que entraram, cada uma contada uma vez só, mesmo que volte várias vezes.' }];
+const CHART_B = [{ key: 'product_views', label: 'Cliques em peças', color: '#facc15', desc: 'vezes que alguém abriu uma peça para ver detalhes.' }, { key: 'adds', label: 'Na sacola', color: '#fb923c', desc: 'vezes que uma peça foi colocada na sacola.' }, { key: 'orders', label: 'Pedidos', color: '#4ade80', desc: 'pedidos enviados pelo catálogo para o WhatsApp da loja.' }, { key: 'whatsapp', label: 'WhatsApp', color: '#a78bfa', desc: 'cliques no botão de conversar com a loja.' }];
 function LineCard({ title, note, data, lines, bucket, multi, selT, onPick }) {
   const [hidden, setHidden] = useState({});
   return (
@@ -1693,7 +1693,16 @@ function LineCard({ title, note, data, lines, bucket, multi, selT, onPick }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      {note && <div className="text-[11px] text-neutral-500 mt-1">{note}</div>}
+      <div className="mt-3 pt-3 border-t border-neutral-800 space-y-1.5">
+        <div className="text-[11px] uppercase tracking-wide text-neutral-400">O que cada linha mostra</div>
+        {lines.map(l => (
+          <div key={l.key} className="flex items-start gap-2 text-[12px] text-neutral-300">
+            <span style={{ width: 14, height: 4, background: l.color, display: 'inline-block', borderRadius: 2, marginTop: 6, flexShrink: 0 }} />
+            <span><b className="text-neutral-100 font-medium">{l.label}:</b> {l.desc}</span>
+          </div>
+        ))}
+        {note && <div className="text-[11px] text-neutral-400 pt-1">{note}</div>}
+      </div>
       <div className="text-[11px] text-neutral-500">Toque em um ponto do gráfico para ver o detalhamento.</div>
     </div>
   );
