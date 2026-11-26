@@ -71,9 +71,25 @@ const VID = (() => {
   const mk = () => 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
   try { let v = localStorage.getItem('movia_vid'); if (!v) { v = mk(); localStorage.setItem('movia_vid', v); } return v; } catch (e) { return mk(); }
 })();
+// Sessão: atualizar a página (F5) mantém a mesma sessão; fechar a aba/janela encerra; 30 min parado também.
+function sessionState() {
+  const now = Date.now(); const mk = () => 's' + now.toString(36) + Math.random().toString(36).slice(2, 8);
+  try {
+    const raw = sessionStorage.getItem('movia_sess');
+    if (raw) { const o = JSON.parse(raw); if (o && o.id && now - o.last < 30 * 60000) { o.last = now; sessionStorage.setItem('movia_sess', JSON.stringify(o)); return { id: o.id, fresh: false }; } }
+    const n = { id: mk(), last: now }; sessionStorage.setItem('movia_sess', JSON.stringify(n)); return { id: n.id, fresh: true };
+  } catch (e) { return { id: mk(), fresh: true }; }
+}
+function touchSession() {
+  try { const raw = sessionStorage.getItem('movia_sess'); if (raw) { const o = JSON.parse(raw); o.last = Date.now(); sessionStorage.setItem('movia_sess', JSON.stringify(o)); } } catch (e) { /* ignora */ }
+}
+function isBot() {
+  try { return !!navigator.webdriver || /bot|crawl|spider|headless|lighthouse|pagespeed/i.test(navigator.userAgent || ''); } catch (e) { return false; }
+}
 function trackOff() { try { return localStorage.getItem('movia_no_track') === '1'; } catch (e) { return false; } }
 function track(type, f) {
-  if (trackOff()) return;
+  if (trackOff() || isBot()) return;
+  touchSession();
   try {
     f = f || {};
     sb.rpc('track_event', { p_vid: VID, p_type: type, p_product_id: f.pid || null, p_product_name: f.name || null, p_tab: f.tab || null, p_value: f.value != null ? f.value : null, p_meta: f.meta || {} }).then(() => {}, () => {});
@@ -529,7 +545,23 @@ function App() {
   useEffect(() => {
     if (!catalog || visitSent.current) return;
     visitSent.current = true;
-    track('visit', { meta: { ref: refSource() } });
+    if (trackOff() || isBot()) return;
+    // aba de entrada (link direto, ex.: #aba-black-friday)
+    let entry = '';
+    try {
+      const m = /^#aba-(.+)$/.exec(decodeURIComponent(window.location.hash || ''));
+      const t = m && Array.isArray(catalog.tabs) ? catalog.tabs.find(x => tabSlug(x.name) === m[1]) : null;
+      if (t) entry = t.id;
+    } catch (e) { /* ignora */ }
+    const send = () => {
+      const sess = sessionState();
+      if (sess.fresh) track('visit', { meta: { ref: refSource(), sid: sess.id, entry } });
+    };
+    if (document.visibilityState === 'visible') send();
+    else {
+      const h = () => { if (document.visibilityState === 'visible') { document.removeEventListener('visibilitychange', h); send(); } };
+      document.addEventListener('visibilitychange', h);
+    }
   }, [catalog]);
   useEffect(() => { if (activeTabId) track('tab_view', { tab: activeTabId }); }, [activeTabId]);
   // sacola ao vivo: o sistema mostra quais peças estão em sacolas abertas (anônimo)

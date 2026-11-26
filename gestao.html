@@ -52,7 +52,7 @@
 const { useState, useEffect, useMemo, useRef } = React;
 const {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine
 } = Recharts;
 
 // =====================================================================
@@ -1633,41 +1633,120 @@ const EV_TEXT = {
   order_sent: (e) => '✅ Pedido enviado' + (e.value ? ' · ' + formatBRL(e.value) : ''),
   whatsapp_click: (e) => '💬 Clicou no WhatsApp',
 };
-function ActivityMini({ tabs, onOpen }) {
-  const [live, setLive] = useState(null);
-  useEffect(() => {
-    let off = false;
-    const load = async () => { try { const { data, error } = await sb.rpc('activity_live'); if (!off && !error && data) setLive(data); } catch (e) { /* sem SQL ainda */ } };
-    load(); const t = setInterval(load, 20000);
-    return () => { off = true; clearInterval(t); };
-  }, []);
-  if (!live) return null;
-  const now = Date.now();
-  const promo = (tabs || []).find(t => t.kind === 'promo' && tabState(t, now) === 'live');
-  const cartTotal = (live.carts || []).reduce((s, c) => s + Number(c.total || 0), 0);
+function bucketMeta(from, to) { return (to - from) <= 2.2 * 86400000 ? 'hour' : 'day'; }
+function tFmt(t, bucket, multi) {
+  const d = String(t).slice(8, 10) + '/' + String(t).slice(5, 7);
+  if (bucket === 'hour') return multi ? d + ' ' + String(t).slice(11, 13) + 'h' : String(t).slice(11, 13) + 'h';
+  return d;
+}
+function tLong(t, bucket) {
+  const d = String(t).slice(8, 10) + '/' + String(t).slice(5, 7);
+  return bucket === 'hour' ? d + ' · ' + String(t).slice(11, 13) + ':00 às ' + String(t).slice(11, 13) + ':59' : d + ' (dia todo)';
+}
+function tRange(t, bucket) { const f = new Date(String(t) + ':00-03:00'); return { from: f, to: new Date(f.getTime() + (bucket === 'hour' ? 3600000 : 86400000)) }; }
+const CHART_A = [{ key: 'visits', label: 'Visitas', color: '#e5e5e5' }, { key: 'uniques', label: 'Visitantes únicos', color: '#60a5fa' }];
+const CHART_B = [{ key: 'product_views', label: 'Cliques em peças', color: '#facc15' }, { key: 'adds', label: 'Na sacola', color: '#fb923c' }, { key: 'orders', label: 'Pedidos', color: '#4ade80' }, { key: 'whatsapp', label: 'WhatsApp', color: '#a78bfa' }];
+function LineCard({ title, note, data, lines, bucket, multi, selT, onPick }) {
+  const [hidden, setHidden] = useState({});
   return (
-    <button onClick={onOpen} className={`w-full text-left p-4 mb-4 border ${promo ? 'border-red-500 bg-red-950/40' : 'border-neutral-800 bg-neutral-950'}`}>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-        <span className="text-[11px] uppercase tracking-wider text-neutral-400">{promo ? '🔥 ' + promo.name + ' no ar · ' : ''}Ao vivo no catálogo</span>
+    <div className="bg-neutral-950 border border-neutral-800 p-3 mb-4">
+      <div className="text-sm text-neutral-100 mb-2">{title}</div>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {lines.map(l => (
+          <button key={l.key} onClick={() => setHidden(h => ({ ...h, [l.key]: !h[l.key] }))} className="flex items-center gap-1.5 text-[12px] px-2 py-1 border border-neutral-700" style={{ opacity: hidden[l.key] ? 0.4 : 1 }} aria-pressed={!hidden[l.key]}>
+            <span style={{ width: 10, height: 10, background: l.color, display: 'inline-block', borderRadius: 2 }} />{l.label}
+          </button>
+        ))}
       </div>
-      <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-neutral-100">
-        <span><b className="fw-mono text-lg">{live.online}</b> online agora</span>
-        <span><b className="fw-mono text-lg">{(live.carts || []).length}</b> sacola(s) · {formatBRL(cartTotal)}</span>
-        <span><b className="fw-mono text-lg">{live.visits_today}</b> visitas hoje</span>
-        <span><b className="fw-mono text-lg">{live.orders_today}</b> pedido(s) hoje</span>
+      <div style={{ width: '100%', height: 220 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 8, right: 12, left: -18, bottom: 0 }} style={{ cursor: 'pointer' }}
+            onClick={(st) => { if (st && st.activePayload && st.activePayload.length) onPick(st.activePayload[0].payload); }}>
+            <CartesianGrid stroke="#262626" strokeDasharray="3 3" />
+            <XAxis dataKey="t" tickFormatter={(t) => tFmt(t, bucket, multi)} tick={{ fill: '#737373', fontSize: 11 }} stroke="#404040" minTickGap={18} />
+            <YAxis allowDecimals={false} tick={{ fill: '#737373', fontSize: 11 }} stroke="#404040" />
+            <Tooltip labelFormatter={(t) => tLong(t, bucket)} contentStyle={{ background: '#0a0a0a', border: '1px solid #404040', fontSize: 12 }} labelStyle={{ color: '#e5e5e5' }} />
+            {selT && <ReferenceLine x={selT} stroke="#ffffff" strokeDasharray="4 3" />}
+            {lines.map(l => (
+              <Line key={l.key} type="monotone" dataKey={l.key} name={l.label} stroke={l.color} strokeWidth={2} hide={!!hidden[l.key]}
+                dot={{ r: 3, fill: l.color }} activeDot={{ r: 7, stroke: '#fff', strokeWidth: 2 }} isAnimationActive={false} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
       </div>
-      <div className="text-[11px] text-neutral-500 mt-1">Toque para ver a atividade completa</div>
-    </button>
+      {note && <div className="text-[11px] text-neutral-500 mt-1">{note}</div>}
+      <div className="text-[11px] text-neutral-500">Toque em um ponto do gráfico para ver o detalhamento.</div>
+    </div>
   );
 }
-function ActivityTab({ tabs }) {
+function BucketDetail({ det, loading, tabName, onClose, onDrill }) {
+  if (!det) return null;
+  const s = det.data || {}; const tot = s.totals || {};
+  const span = det.to - det.from;
+  return (
+    <div className="bg-neutral-950 border-2 border-white p-4 mb-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-neutral-500">Detalhamento</div>
+          <div className="text-base text-neutral-100">{det.label}</div>
+        </div>
+        <button className="fw-btn-ghost" onClick={onClose} aria-label="Fechar detalhamento"><X size={13} />Fechar</button>
+      </div>
+      {loading && !det.data && <div className="text-neutral-500 text-sm">Carregando...</div>}
+      {det.data && (
+        <div>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {[['Visitas', tot.visits], ['Únicos', tot.uniques], ['Cliques', tot.product_views], ['Sacola', tot.adds], ['Pedidos', tot.orders], ['WhatsApp', tot.whatsapp]].map(([l, v]) => (
+              <div key={l} className="border border-neutral-800 p-2"><div className="text-[10px] uppercase tracking-wider text-neutral-500">{l}</div><div className="fw-mono text-lg text-neutral-100">{v ?? 0}</div></div>
+            ))}
+          </div>
+          {span > 2 * 3600000 && (s.series || []).length > 1 && (
+            <LineCard title="Hora a hora (toque numa hora para detalhar)" data={s.series} lines={[CHART_A[0], CHART_B[0], CHART_B[1], CHART_B[2]]} bucket="hour" multi={false} selT={null} onPick={(p) => onDrill(p.t)} />
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <div className="text-[12px] text-neutral-400 mb-1">Peças mais clicadas</div>
+              {(s.products || []).length === 0 ? <div className="text-neutral-600 text-sm">Sem cliques.</div> : (s.products || []).slice(0, 6).map(p => (
+                <div key={p.id} className="flex justify-between text-[13px] text-neutral-200 py-0.5"><span className="truncate pr-2">{p.name}</span><span className="fw-mono shrink-0">{p.views} · 🛍 {p.adds}</span></div>
+              ))}
+            </div>
+            <div>
+              <div className="text-[12px] text-neutral-400 mb-1">De onde vieram</div>
+              {(s.referrers || []).length === 0 ? <div className="text-neutral-600 text-sm">Sem visitas.</div> : (s.referrers || []).slice(0, 6).map(r => (
+                <div key={r.ref} className="flex justify-between text-[13px] text-neutral-200 py-0.5"><span className="truncate pr-2">{r.ref}</span><span className="fw-mono">{r.n}</span></div>
+              ))}
+            </div>
+            <div>
+              <div className="text-[12px] text-neutral-400 mb-1">Abas</div>
+              {(s.tabs || []).filter(t => t.views || t.product_views || t.adds).length === 0 ? <div className="text-neutral-600 text-sm">Sem atividade.</div> : (s.tabs || []).filter(t => t.views || t.product_views || t.adds).map(t => (
+                <div key={t.tab || 'todas'} className="flex justify-between text-[13px] text-neutral-200 py-0.5"><span className="truncate pr-2">{tabName(t.tab)}</span><span className="fw-mono shrink-0">{t.views} abertas · {t.product_views} cliques</span></div>
+              ))}
+            </div>
+            <div>
+              <div className="text-[12px] text-neutral-400 mb-1">Pedidos enviados</div>
+              {(s.orders_list || []).length === 0 ? <div className="text-neutral-600 text-sm">Nenhum pedido.</div> : (s.orders_list || []).map((o, i) => (
+                <div key={i} className="text-[13px] text-neutral-200 py-1 border-b border-neutral-900 last:border-b-0">
+                  <div className="flex justify-between"><span className="text-neutral-400">{new Date(o.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><span className="fw-mono">{formatBRL(o.value || 0)}</span></div>
+                  <div className="text-[11px] text-neutral-500">{(o.items || []).map(it => it.qty + 'x ' + it.name + (it.promoTab ? ' 🔥' : '')).join(', ')}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityTab({ tabs, compact, onOpenActivity }) {
   const [range, setRange] = useState('today');
   const [sum, setSum] = useState(null);
   const [live, setLive] = useState(null);
   const [err, setErr] = useState('');
   const [rt, setRt] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [det, setDet] = useState(null);
+  const [detLoading, setDetLoading] = useState(false);
   const [, setTick] = useState(0);
   const [noTrack, setNoTrack] = useState(() => { try { return localStorage.getItem('movia_no_track') === '1'; } catch (e) { return false; } });
   const rangeRef = useRef(range); rangeRef.current = range;
@@ -1684,13 +1763,22 @@ function ActivityTab({ tabs }) {
   const loadSum = async () => {
     try {
       const r = activityRange(rangeRef.current, tabsRef.current);
-      const { data, error } = await sb.rpc('activity_summary', { p_from: r.from.toISOString(), p_to: r.to.toISOString() });
+      const { data, error } = await sb.rpc('activity_summary', { p_from: r.from.toISOString(), p_to: r.to.toISOString(), p_bucket: bucketMeta(r.from, r.to) });
       if (error) throw error;
       setSum(data);
     } catch (e) { /* o erro principal aparece no loadLive */ }
   };
   const sumRef = useRef(loadSum); sumRef.current = loadSum;
-  useEffect(() => { setSum(null); loadSum(); }, [range]);
+  useEffect(() => { setSum(null); setDet(null); loadSum(); }, [range]);
+  const openDetail = async (from, to, label, t) => {
+    const d = { from, to, label, t };
+    setDet(d); setDetLoading(true);
+    try {
+      const { data, error } = await sb.rpc('activity_summary', { p_from: from.toISOString(), p_to: to.toISOString(), p_bucket: 'hour' });
+      if (!error) setDet({ ...d, data });
+    } catch (e) { /* ignora */ }
+    setDetLoading(false);
+  };
   useEffect(() => {
     let ch = null, tl = null, ts = null;
     loadLive();
@@ -1733,12 +1821,18 @@ function ActivityTab({ tabs }) {
   );
   const funnelRows = [['Visitaram o catálogo', fun.visitors], ['Olharam uma peça', fun.viewers], ['Colocaram na sacola', fun.adders], ['Enviaram pedido', fun.buyers]];
   const prods = (sum && sum.products) || [];
-  const days = (sum && sum.days) || []; const maxVisits = Math.max(1, ...days.map(d => d.visits));
+  const series = (sum && sum.series) || [];
+  const bucket = bucketMeta(rangeInfo.from, rangeInfo.to);
+  const multi = series.length > 0 && series[0].t.slice(0, 10) !== series[series.length - 1].t.slice(0, 10);
+  const selT = det && det.t && series.some(p => p.t === det.t) ? det.t : null;
+  const pickPoint = (p) => { const r = tRange(p.t, bucket); openDetail(r.from, r.to, tLong(p.t, bucket), p.t); };
+  const drill = (t) => { const r = tRange(t, 'hour'); openDetail(r.from, r.to, tLong(t, 'hour'), t); };
+  const entries = (sum && sum.entries) || [];
   const refs = (sum && sum.referrers) || []; const maxRef = Math.max(1, ...refs.map(r => r.n));
 
   return (
     <div>
-      <Section title="Atividade do site" action={<span className="text-[11px] text-neutral-500 flex items-center gap-1.5"><span className={`inline-block w-2 h-2 rounded-full ${rt ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />{rt ? 'tempo real' : 'atualiza a cada 15 s'}</span>}>
+      <Section title={compact ? "Atividade do catálogo ao vivo" : "Atividade do site"} action={<span className="text-[11px] text-neutral-500 flex items-center gap-1.5"><span className={`inline-block w-2 h-2 rounded-full ${rt ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`} />{rt ? 'tempo real' : 'atualiza a cada 15 s'}</span>}>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-neutral-950 border border-green-700 p-3">
             <div className="text-[11px] uppercase tracking-wider text-green-400">Online agora</div>
@@ -1757,7 +1851,15 @@ function ActivityTab({ tabs }) {
           {chip('today', 'Hoje')}{chip('7d', '7 dias')}{chip('30d', '30 dias')}
           {promoTabs.map(t => chip('tab:' + t.id, '🔥 ' + t.name, true))}
         </div>
-        <div className="text-[11px] text-neutral-500 mt-2">Números dos {rangeInfo.label}.</div>
+        <div className="text-[11px] text-neutral-500 mt-2">Período: {rangeInfo.label}.</div>
+      </Section>
+
+      <Section title="Gráficos">
+        {sum === null && <div className="text-neutral-600 text-sm mb-3">Carregando gráficos...</div>}
+        <LineCard title="Acessos ao catálogo" note="Visita = uma sessão. Atualizar a página (F5) não conta de novo; fechar e abrir o site outra vez, sim." data={series} lines={CHART_A} bucket={bucket} multi={multi} selT={selT} onPick={pickPoint} />
+        <LineCard title="Interesse e vendas" data={series} lines={CHART_B} bucket={bucket} multi={multi} selT={selT} onPick={pickPoint} />
+        <BucketDetail det={det} loading={detLoading} tabName={tabName} onClose={() => setDet(null)} onDrill={drill} />
+        {compact && <button className="fw-btn" onClick={onOpenActivity}><Pulse size={14} />Ver atividade completa</button>}
       </Section>
 
       {promoTabs.length > 0 && (
@@ -1794,6 +1896,8 @@ function ActivityTab({ tabs }) {
         </div>
       </Section>
 
+      {!compact && (
+      <div>
       <Section title="Funil de compra">
         <div className="bg-neutral-950 border border-neutral-800 p-4 space-y-3">
           {funnelRows.map(([l, v], i) => (
@@ -1854,31 +1958,15 @@ function ActivityTab({ tabs }) {
         <Section title="Desempenho por aba">
           <div className="bg-neutral-950 border border-neutral-800 overflow-x-auto">
             <table className="w-full fw-table">
-              <thead><tr><th>Aba</th><th>Aberturas</th><th>Cliques</th><th>Sacola</th></tr></thead>
+              <thead><tr><th>Aba</th><th>Entradas</th><th>Aberturas</th><th>Cliques</th><th>Sacola</th></tr></thead>
               <tbody>
-                {((sum && sum.tabs) || []).length === 0 && <tr><td colSpan={4} className="text-neutral-600 text-center py-6">Sem dados.</td></tr>}
-                {((sum && sum.tabs) || []).map(t => (<tr key={t.tab || 'todas'}><td>{tabName(t.tab)}</td><td className="fw-mono">{t.views}</td><td className="fw-mono">{t.product_views}</td><td className="fw-mono">{t.adds}</td></tr>))}
+                {((sum && sum.tabs) || []).length === 0 && <tr><td colSpan={5} className="text-neutral-600 text-center py-6">Sem dados.</td></tr>}
+                {((sum && sum.tabs) || []).map(t => (<tr key={t.tab || 'todas'}><td>{tabName(t.tab)}</td><td className="fw-mono">{(entries.find(e => e.tab === t.tab) || {}).n || 0}</td><td className="fw-mono">{t.views}</td><td className="fw-mono">{t.product_views}</td><td className="fw-mono">{t.adds}</td></tr>))}
               </tbody>
             </table>
           </div>
         </Section>
       </div>
-
-      <Section title="Visitas por dia">
-        <div className="bg-neutral-950 border border-neutral-800 p-4">
-          {days.length === 0 ? <div className="text-neutral-600 text-sm">Sem dados.</div> : (
-            <div className="flex items-end gap-1.5 overflow-x-auto" style={{ height: 120 }}>
-              {days.map(d => (
-                <div key={d.d} className="flex flex-col items-center justify-end shrink-0" style={{ width: days.length > 14 ? 18 : 34, height: '100%' }} title={d.d + ': ' + d.visits + ' visitas, ' + d.orders + ' pedidos'}>
-                  <div className="text-[9px] text-neutral-500">{d.visits}</div>
-                  <div className="w-full bg-neutral-300" style={{ height: Math.max(3, Math.round((d.visits / maxVisits) * 80)) + 'px' }} />
-                  <div className="text-[9px] text-neutral-500 mt-1">{String(d.d).slice(8, 10)}/{String(d.d).slice(5, 7)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </Section>
 
       <Section title="Acontecendo agora">
         <div className="bg-neutral-950 border border-neutral-800">
@@ -1901,15 +1989,18 @@ function ActivityTab({ tabs }) {
           </span>
         </label>
       </Section>
+      </div>
+      )}
     </div>
   );
 }
 
+
 function DashboardTab({ revenueThisMonth, profitThisMonth, pendingOrders, lowStock, revenueByMonth, salesByType, clients, storeName, todaySummary, onOpenAgenda, catalogTabs, onOpenActivity }) {
   return (
     <div>
+      {sb && <ActivityTab compact tabs={catalogTabs || []} onOpenActivity={onOpenActivity} />}
       {todaySummary && <TodayCard summary={todaySummary} onOpen={onOpenAgenda} />}
-      {sb && <ActivityMini tabs={catalogTabs} onOpen={onOpenActivity} />}
       <div className="fw-clip bg-neutral-950 border border-neutral-800 border-b-2 border-b-white px-4 md:px-6 py-5 mb-8 flex flex-wrap gap-4 md:gap-6">
         <StatCard label="Vendas do mês" value={formatBRL(revenueThisMonth)} />
         <StatCard label="Lucro do mês" value={formatBRL(profitThisMonth)} alert={profitThisMonth < 0} />
