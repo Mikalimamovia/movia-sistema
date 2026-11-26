@@ -550,16 +550,29 @@ function App({ sb, session, onSignOut }) {
   const [saveState, setSaveState] = useState('idle');
   const [publishState, setPublishState] = useState('idle');
   const [menuOpen, setMenuOpen] = useState(false);
+  // proteção contra dois aparelhos/abas sobrescreverem um ao outro: versão que este aparelho conhece
+  const verRef = useRef(null);
+  const skipSave = useRef(false);
+  const dirty = useRef(false);
+  const sameTime = (a, b) => { const x = Date.parse(a), y = Date.parse(b); return !isNaN(x) && !isNaN(y) && x === y; };
+  const applyServer = (row, state) => { skipSave.current = true; verRef.current = row.updated_at; setData({ ...emptyData(), ...row.data }); setSaveState(state); };
+  const pullServer = async (state) => {
+    const { data: row, error } = await sb.from('movia_data').select('data, updated_at').eq('user_id', SHARED_STORE_ID).maybeSingle();
+    if (error || !row || !row.data) return null;
+    return row;
+  };
 
   useEffect(() => {
     (async () => {
       try {
         const { data: row, error } = await sb
           .from('movia_data')
-          .select('data')
+          .select('data, updated_at')
           .eq('user_id', SHARED_STORE_ID)
           .maybeSingle();
         if (error) throw error;
+        verRef.current = row && row.updated_at ? row.updated_at : null;
+        skipSave.current = true;
         setData(row && row.data && Object.keys(row.data).length ? { ...emptyData(), ...row.data } : emptyData());
       } catch (e) {
         console.error('Erro ao carregar dados:', e);
@@ -570,14 +583,24 @@ function App({ sb, session, onSignOut }) {
 
   useEffect(() => {
     if (data === null) return;
-    setSaveState('saving');
+    if (skipSave.current) { skipSave.current = false; return; }
+    setSaveState('saving'); dirty.current = true;
     const t = setTimeout(async () => {
-      try {
-        const { error } = await sb
-          .from('movia_data')
-          .upsert({ user_id: SHARED_STORE_ID, data, updated_at: new Date().toISOString() });
+      const newVer = new Date().toISOString();
+      const plainSave = async () => {
+        const { error } = await sb.from('movia_data').upsert({ user_id: SHARED_STORE_ID, data, updated_at: newVer });
         if (error) throw error;
-        setSaveState('saved');
+        verRef.current = newVer; dirty.current = false; setSaveState('saved');
+      };
+      try {
+        if (!verRef.current) { await plainSave(); return; }
+        // só grava se ninguém mais salvou nesse meio tempo
+        const r = await sb.from('movia_data').update({ data, updated_at: newVer }).eq('user_id', SHARED_STORE_ID).eq('updated_at', verRef.current).select('updated_at');
+        if (r.error) { await plainSave(); return; }
+        if (r.data && r.data.length > 0) { verRef.current = newVer; dirty.current = false; setSaveState('saved'); return; }
+        const row = await pullServer();
+        if (!row || sameTime(row.updated_at, verRef.current)) { await plainSave(); return; }
+        dirty.current = false; applyServer(row, 'conflict');
       } catch (e) {
         console.error('Erro ao salvar dados:', e);
         setSaveState('error');
@@ -585,6 +608,27 @@ function App({ sb, session, onSignOut }) {
     }, 500);
     return () => clearTimeout(t);
   }, [data]);
+
+  // ao voltar para o app (ou a cada 45 s), traz o que outro aparelho tiver salvo
+  useEffect(() => {
+    let busy = false;
+    const check = async () => {
+      if (busy || dirty.current || data === null || document.visibilityState !== 'visible' || !verRef.current) return;
+      busy = true;
+      try {
+        const { data: v, error } = await sb.from('movia_data').select('updated_at').eq('user_id', SHARED_STORE_ID).maybeSingle();
+        if (!error && v && v.updated_at && Date.parse(v.updated_at) > Date.parse(verRef.current) && !dirty.current) {
+          const row = await pullServer();
+          if (row && !dirty.current) applyServer(row, 'synced');
+        }
+      } catch (e) { /* ignora */ }
+      busy = false;
+    };
+    const iv = setInterval(check, 45000);
+    const onVis = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [data === null]);
 
   // ---- derived (must run on every render, even while data is still loading) ----
   const safeData = data || emptyData();
@@ -897,7 +941,7 @@ function App({ sb, session, onSignOut }) {
           <img src={LOGO_DATA_URI} alt="movia." className="h-6 w-auto" />
           <div className="flex items-center gap-3">
             <span className="fw-mono text-[10px] text-neutral-500">
-              {saveState === 'saving' ? 'salvando...' : saveState === 'error' ? 'erro ao salvar' : 'salvo'}
+              {saveState === 'saving' ? 'salvando...' : saveState === 'error' ? 'erro ao salvar' : saveState === 'conflict' ? 'outro aparelho salvou: recarregado' : saveState === 'synced' ? 'atualizado' : 'salvo'}
             </span>
             <button onClick={() => setMenuOpen(true)} aria-label="Abrir menu" className="text-white p-2 -mr-2">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -936,7 +980,7 @@ function App({ sb, session, onSignOut }) {
         </nav>
         <div className="px-5 py-3 border-t border-neutral-800">
           <div className="fw-mono text-[10px] text-neutral-600 mb-2">
-            {saveState === 'saving' ? 'salvando...' : saveState === 'error' ? 'erro ao salvar' : 'dados salvos'}
+            {saveState === 'saving' ? 'salvando...' : saveState === 'error' ? 'erro ao salvar' : saveState === 'conflict' ? 'outro aparelho salvou: dados recarregados, refaça a última alteração' : saveState === 'synced' ? 'dados atualizados de outro aparelho' : 'dados salvos'}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-neutral-500 truncate max-w-[120px]" title={session.user.email}>{session.user.email}</span>
