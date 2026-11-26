@@ -1951,8 +1951,10 @@ function TabForm({ products, initial, onSave, onCancel }) {
   const [q, setQ] = useState('');
   const [pct, setPct] = useState('');
   const [err, setErr] = useState('');
+  const [hexText, setHexText] = useState((initial && initial.bg) || '#000000');
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const promo = f.kind === 'promo';
+  useEffect(() => { if (/^#[0-9a-fA-F]{6}$/.test(f.bg) && f.bg.toLowerCase() !== hexText.toLowerCase() && !(hexText.length === 4 && '#' + hexText.slice(1).split('').map(c => c + c).join('').toLowerCase() === f.bg)) setHexText(f.bg.toUpperCase()); }, [f.bg]);
   const sel = new Set(f.productIds);
   const shown = products.filter(p => !q.trim() || (p.name || '').toLowerCase().includes(q.trim().toLowerCase()));
   const toggle = (id) => setF(x => {
@@ -2010,7 +2012,17 @@ function TabForm({ products, initial, onSave, onCancel }) {
               style={{ width: 34, height: 34, background: c.hex, border: f.bg.toLowerCase() === c.hex ? '2px solid #fff' : '1px solid #555', outline: f.bg.toLowerCase() === c.hex ? '2px solid #000' : 'none' }} />
           ))}
           <input type="color" value={/^#[0-9a-f]{6}$/i.test(f.bg) ? f.bg : '#000000'} onChange={e => set('bg', e.target.value)} aria-label="Escolher outra cor" style={{ width: 44, height: 34, background: 'transparent', border: '1px solid #555', padding: 0 }} />
-          <span className="text-[11px] text-neutral-500 fw-mono">{f.bg}</span>
+        </div>
+        <div className="flex items-center gap-2 mb-3 max-w-xs">
+          <span className="text-[11px] text-neutral-500 shrink-0">Ou digite o código:</span>
+          <input className="fw-input fw-mono" style={{ textTransform: 'uppercase' }} maxLength={7} value={hexText} placeholder="#000000" aria-label="Código da cor"
+            onChange={e => {
+              let v = e.target.value.trim().replace(/[^0-9a-fA-F#]/g, '');
+              if (v && v[0] !== '#') v = '#' + v;
+              setHexText(v);
+              if (/^#[0-9a-fA-F]{6}$/.test(v)) set('bg', v.toLowerCase());
+              else if (/^#[0-9a-fA-F]{3}$/.test(v)) set('bg', '#' + v.slice(1).split('').map(c => c + c).join('').toLowerCase());
+            }} />
         </div>
         <TabPreview f={f} />
       </div>
