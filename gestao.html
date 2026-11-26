@@ -2209,6 +2209,42 @@ function PhotoUploader({ sb, value, onChange, commitOnBlur = false }) {
   );
 }
 
+// arrastar para reordenar (mouse no notebook, dedo no tablet). keys = chaves das linhas na ordem exibida
+function useWide() {
+  const get = () => { try { return window.innerWidth >= 768; } catch (e) { return false; } };
+  const [w, setW] = useState(get);
+  useEffect(() => { const f = () => setW(get()); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, []);
+  return w;
+}
+function useDragSort(keys, onMove) {
+  const rows = useRef({});
+  const st = useRef(null);
+  const [view, setView] = useState(null);
+  const calcInsert = (y) => { let n = 0; keys.forEach(k => { const el = rows.current[k]; if (!el) return; const r = el.getBoundingClientRect(); if (y > r.top + r.height / 2) n++; }); return n; };
+  const finish = (commit) => { const c = st.current; st.current = null; setView(null); if (commit && c && c.ins != null) onMove(c.key, c.ins); };
+  const handle = (key) => ({
+    style: { touchAction: 'none', cursor: 'grab' },
+    onPointerDown: (e) => { if (e.button != null && e.button !== 0) return; e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) { /* ignora */ } st.current = { key, ins: keys.indexOf(key) }; setView({ key, ins: keys.indexOf(key) }); },
+    onPointerMove: (e) => {
+      if (!st.current) return;
+      const y = e.clientY; const ins = calcInsert(y); st.current.ins = ins; setView({ key, ins });
+      const vh = window.innerHeight; if (y < 70) window.scrollBy(0, -14); else if (y > vh - 70) window.scrollBy(0, 14);
+    },
+    onPointerUp: () => finish(true),
+    onPointerCancel: () => finish(false),
+    'aria-label': 'Arraste para mudar a posição',
+  });
+  const rowRef = (key) => (el) => { if (el) rows.current[key] = el; else delete rows.current[key]; };
+  const rowClass = (key, i) => {
+    if (!view) return '';
+    const from = keys.indexOf(view.key);
+    let c = view.key === key ? ' opacity-40' : '';
+    if (view.ins !== from && view.ins !== from + 1) { if (view.ins === i) c += ' border-t-2 border-t-white'; if (view.ins === keys.length && i === keys.length - 1) c += ' border-b-2 border-b-white'; }
+    return c;
+  };
+  return { handle, rowRef, rowClass, dragging: !!view };
+}
+const GripIcon = () => (<svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="3" r="1.6" /><circle cx="10" cy="3" r="1.6" /><circle cx="4" cy="9" r="1.6" /><circle cx="10" cy="9" r="1.6" /><circle cx="4" cy="15" r="1.6" /><circle cx="10" cy="15" r="1.6" /></svg>);
 function MultiPhotoUploader({ sb, photos, onChange }) {
   const arr = photos || [];
   const setAt = (i, url) => {
@@ -2217,15 +2253,19 @@ function MultiPhotoUploader({ sb, photos, onChange }) {
     onChange(next.filter(Boolean));
   };
   const move = (i, to) => { if (to < 0 || to >= arr.length) return; const next = [...arr]; const [x] = next.splice(i, 1); next.splice(to, 0, x); onChange(next); };
+  const wide = useWide();
+  const keysP = arr.map((_, i) => String(i));
+  const dnd = useDragSort(keysP, (k, ins) => { const from = Number(k); move(from, ins > from ? ins - 1 : ins); });
   return (
     <div className="flex flex-col gap-2">
-      {arr.length > 1 && <div className="text-[11px] text-neutral-400">A primeira foto é a capa. Use as setas para ordenar as fotos como quiser.</div>}
+      {arr.length > 1 && <div className="text-[11px] text-neutral-400">A primeira foto é a capa. {wide ? 'Segure a alça ⠿ e arraste para ordenar as fotos como quiser.' : 'Use as setas para ordenar as fotos como quiser.'}</div>}
       {arr.map((url, i) => (
-        <div key={i} className="flex items-center gap-2">
+        <div key={i} ref={dnd.rowRef(String(i))} className={'flex items-center gap-2' + dnd.rowClass(String(i), i)}>
+          {arr.length > 1 && wide && <div className="shrink-0 text-neutral-300 px-1 py-2 select-none border border-neutral-700" title="Arraste para mudar a posição" {...dnd.handle(String(i))}><GripIcon /></div>}
           {arr.length > 1 && (
             <div className="flex flex-col gap-1 shrink-0 items-center">
               <span className={'text-[9px] px-1 ' + (i === 0 ? 'bg-white text-black font-bold' : 'text-neutral-500')}>{i === 0 ? 'CAPA' : i + 1}</span>
-              <div className="flex gap-1">
+              <div className={'flex gap-1' + (wide ? ' hidden' : '')}>
                 <button type="button" className="fw-btn-ghost" aria-label={'Subir foto ' + (i + 1)} disabled={i === 0} onClick={() => move(i, i - 1)}>↑</button>
                 <button type="button" className="fw-btn-ghost" aria-label={'Descer foto ' + (i + 1)} disabled={i === arr.length - 1} onClick={() => move(i, i + 1)}>↓</button>
               </div>
@@ -2644,24 +2684,28 @@ function CatalogOrderManager({ products, order, tabs, onChange }) {
   const commit = (arr) => onChange(arr);
   const move = (id, to) => { const a = ids.filter(x => x !== id); a.splice(Math.max(0, Math.min(a.length, to)), 0, id); commit(a); };
   const shown = ids.filter(id => !q.trim() || (byId.get(id).name || '').toLowerCase().includes(q.trim().toLowerCase()));
+  const wide = useWide();
+  const canDrag = wide && !q.trim();
+  const dnd = useDragSort(shown, (id, ins) => { const from = ids.indexOf(id); move(id, ins > from ? ins - 1 : ins); });
   return (
     <Section title="Ordem dos produtos no catálogo">
       <div className="bg-neutral-950 border border-neutral-800 p-4 mb-4">
-        <div className="text-[13px] text-neutral-300 mb-3">Escolha a posição de cada peça na vitrine. Peças que estão numa aba promocional ou separada aparecem sempre <b>no fim</b> da vitrine principal, enquanto a aba estiver no ar; dentro da própria aba vale a ordem da aba. Depois de mexer, clique em <b>Publicar</b>.</div>
+        <div className="text-[13px] text-neutral-300 mb-3">Escolha a posição de cada peça na vitrine: no notebook ou tablet, segure a alça ⠿ e arraste; no celular, use as setas. Peças que estão numa aba promocional ou separada aparecem sempre <b>no fim</b> da vitrine principal, enquanto a aba estiver no ar; dentro da própria aba vale a ordem da aba. Depois de mexer, clique em <b>Publicar</b>.</div>
         <button type="button" className="fw-btn-ghost" onClick={() => setOpen(o => !o)}>{open ? 'Fechar a lista' : 'Organizar produtos (' + ids.length + ')'}</button>
         {open && (
           <div className="mt-3">
             <input className="fw-input mb-2" placeholder="Buscar produto..." value={q} onChange={e => setQ(e.target.value)} />
             <div className="space-y-1.5">
               {shown.map((id) => { const p = byId.get(id); const pos = ids.indexOf(id); const tabsOf = inTab(id); return (
-                <div key={id} className="flex items-center gap-2 border border-neutral-800 p-2">
+                <div key={id} ref={dnd.rowRef(id)} className={'flex items-center gap-2 border border-neutral-800 p-2' + dnd.rowClass(id, shown.indexOf(id))}>
+                  {canDrag && <div className="shrink-0 text-neutral-300 px-1.5 py-2 select-none border border-neutral-700" title="Arraste para mudar a posição" {...dnd.handle(id)}><GripIcon /></div>}
                   <span className="fw-mono text-[11px] text-neutral-500 w-6 text-right shrink-0">{pos + 1}</span>
                   {p.photos && p.photos[0] ? <img src={p.photos[0]} alt="" className="w-9 h-9 object-cover shrink-0" /> : <div className="w-9 h-9 bg-neutral-900 shrink-0" />}
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] text-neutral-100 truncate">{p.name}</div>
                     {tabsOf.length > 0 && <div className="text-[10px] text-neutral-400 truncate">na aba: {tabsOf.join(', ')} → vai para o fim</div>}
                   </div>
-                  <div className="flex gap-1 shrink-0">
+                  <div className={'flex gap-1 shrink-0' + (canDrag ? ' hidden' : '')}>
                     <button type="button" className="fw-btn-ghost" title="Para o início" aria-label={'Mover ' + p.name + ' para o início'} disabled={pos === 0} onClick={() => move(id, 0)}>⤒</button>
                     <button type="button" className="fw-btn-ghost" title="Subir" aria-label={'Subir ' + p.name} disabled={pos === 0} onClick={() => move(id, pos - 1)}>↑</button>
                     <button type="button" className="fw-btn-ghost" title="Descer" aria-label={'Descer ' + p.name} disabled={pos === ids.length - 1} onClick={() => move(id, pos + 1)}>↓</button>
