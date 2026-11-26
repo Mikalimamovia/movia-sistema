@@ -586,6 +586,16 @@ function App() {
     }, 1500);
     return () => clearTimeout(t);
   }, [cart, activeTabId]);
+  // presença: enquanto a página estiver aberta e visível, avisa a cada 45 s que a pessoa está online
+  useEffect(() => {
+    const ping = () => {
+      try { if (document.visibilityState !== 'visible' || trackOff() || isBot()) return; sb.rpc('track_presence', { p_vid: VID }).then(() => {}, () => {}); } catch (e) { /* ignora */ }
+    };
+    ping();
+    const t = setInterval(ping, 45000);
+    document.addEventListener('visibilitychange', ping);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', ping); };
+  }, []);
   useEffect(() => {
     const t = setInterval(() => {
       const c = cartLatest.current;
