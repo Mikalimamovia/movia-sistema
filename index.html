@@ -827,7 +827,10 @@ function App() {
     });
   });
   const trackProductView = (p) => track('product_view', { pid: p.id, name: p.name, tab: activeTab ? activeTab.id : null, meta: promoMap[p.id] ? { promoTab: promoMap[p.id].tabId } : {} });
-  const baseProducts = activeTab ? activeTab.productIds.map(id => byId[id]).filter(Boolean) : catalog.products;
+  // vitrine principal: peças que estão em aba (promocional ou separada) no ar vão para o fim, mantendo a ordem escolhida
+  const inLiveTab = new Set(); liveTabs.forEach(tb => (tb.productIds || []).forEach(id => inLiveTab.add(id)));
+  const mainOrdered = [...catalog.products.filter(p => !inLiveTab.has(p.id)), ...catalog.products.filter(p => inLiveTab.has(p.id))];
+  const baseProducts = activeTab ? activeTab.productIds.map(id => byId[id]).filter(Boolean) : mainOrdered;
   const categories = [...new Set(baseProducts.map(p => p.category).filter(Boolean))];
   const filteredProducts = baseProducts.filter(p => {
     const matchesCategory = !activeCategory || p.category === activeCategory;
